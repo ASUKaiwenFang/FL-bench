@@ -45,3 +45,5 @@ data/domain/raw
 *.json
 *.png
 *.pt
+
+.venv/
