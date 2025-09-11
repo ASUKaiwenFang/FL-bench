@@ -1,6 +1,7 @@
-from typing import Any
+from typing import Any, Iterator
 
 import torch
+from torch.utils.data import DataLoader
 
 from src.client.fedavg import FedAvgClient
 from src.utils.dp_mechanisms import (
@@ -19,6 +20,7 @@ class DPFedAvgLocalClient(FedAvgClient):
     
     def __init__(self, **commons):
         super().__init__(**commons)
+        self.iter_trainloader: Iterator[DataLoader]
         
         # Initialize DP parameters
         self.clip_norm = self.args.dp_fedavg_local.clip_norm
@@ -30,6 +32,10 @@ class DPFedAvgLocalClient(FedAvgClient):
             self._noise_handler = self._add_noise_to_gradients
         else:  # parameter mode
             self._noise_handler = self._no_op
+    
+    def set_parameters(self, package: dict[str, Any]):
+        super().set_parameters(package)
+        self.iter_trainloader = iter(self.trainloader)
     
     def fit(self):
         """Train the model with local differential privacy.
@@ -43,34 +49,38 @@ class DPFedAvgLocalClient(FedAvgClient):
         self.model.train()
         self.dataset.train()
         
-        for epoch in range(self.local_epoch):
-            for x, y in self.trainloader:
-                # Skip small batches to avoid BatchNorm issues
-                if len(x) <= 1:
-                    continue
-                
-                x, y = x.to(self.device), y.to(self.device)
-                
-                # Forward pass
-                logit = self.model(x)
-                loss = self.criterion(logit, y)
-                
-                # Backward pass
-                self.optimizer.zero_grad()
-                loss.backward()
-                
-                # Gradient clipping for DP
-                total_norm = clip_gradients(self.model.parameters(), self.clip_norm)
-                
-                # Add noise based on mode (gradient or no-op for parameter mode)
-                self._noise_handler()
-                
-                # Optimizer step
-                self.optimizer.step()
-                
+        for _ in range(self.local_epoch):
+            x, y = self.get_data_batch()
+            
+            # Forward pass
+            logit = self.model(x)
+            loss = self.criterion(logit, y)
+            
+            # Backward pass
+            self.optimizer.zero_grad()
+            loss.backward()
+            
+            # Gradient clipping for DP
+            total_norm = clip_gradients(self.model.parameters(), self.clip_norm)
+            
+            # Add noise based on mode (gradient or no-op for parameter mode)
+            self._noise_handler()
+            
+            # Optimizer step
+            self.optimizer.step()
             
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
+    
+    def get_data_batch(self):
+        try:
+            x, y = next(self.iter_trainloader)
+            if len(x) <= 1:
+                x, y = next(self.iter_trainloader)
+        except StopIteration:
+            self.iter_trainloader = iter(self.trainloader)
+            x, y = next(self.iter_trainloader)
+        return x.to(self.device), y.to(self.device)
     
     def _no_op(self):
         """No operation for parameter noise mode."""
