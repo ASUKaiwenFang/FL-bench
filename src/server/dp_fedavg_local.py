@@ -18,7 +18,7 @@ class DPFedAvgLocalServer(FedAvgServer):
     
     algorithm_name: str = "DP-FedAvg-Local"
     all_model_params_personalized = False
-    return_diff = False
+    return_diff = True
     client_cls = DPFedAvgLocalClient
     
     @staticmethod
@@ -31,6 +31,9 @@ class DPFedAvgLocalServer(FedAvgServer):
                            help="Gradient clipping norm")
         parser.add_argument("--sigma", type=float, default=0.1,
                            help="Noise standard deviation")
+        parser.add_argument("--noise_mode", type=str, 
+                           choices=["gradient", "parameter"], default="gradient",
+                           help="Where to add DP noise: gradient (during training) or parameter (before return)")
         
         return parser.parse_args(args_list)
     

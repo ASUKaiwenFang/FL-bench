@@ -22,7 +22,7 @@ class DPFedAvgCentralServer(FedAvgServer):
     
     algorithm_name: str = "DP-FedAvg-Central"
     all_model_params_personalized = False
-    return_diff = False
+    return_diff = True
     client_cls = DPFedAvgCentralClient
     
     @staticmethod
@@ -46,23 +46,38 @@ class DPFedAvgCentralServer(FedAvgServer):
     def aggregate_client_updates(
         self, client_packages: OrderedDict[int, Dict[str, Any]]
     ):
-        """Aggregate client updates and add central differential privacy noise."""
+        """Aggregate client updates and add central differential privacy noise to aggregated diffs."""
         
-        # Perform standard FedAvg aggregation first
-        super().aggregate_client_updates(client_packages)
+        # Extract client weights and normalize
+        client_weights = [package["weight"] for package in client_packages.values()]
+        weights = torch.tensor(client_weights) / sum(client_weights)
         
-        # Add noise to aggregated parameters for central DP
-        self._add_central_dp_noise()
-    
-    def _add_central_dp_noise(self):
-        """Add differential privacy noise to the global model parameters."""
-        for name, param in self.public_model_params.items():
-            # Add Gaussian noise
-            param.data = add_gaussian_noise(
-                param.data,
-                sigma=10*self.sigma,
-                device=param.device
+        # Aggregate parameter differences with noise
+        for name, global_param in self.public_model_params.items():
+            # Stack parameter differences from all clients
+            diffs = torch.stack(
+                [
+                    package["model_params_diff"][name]
+                    for package in client_packages.values()
+                ],
+                dim=-1,
             )
+            
+            # Compute weighted aggregation of differences
+            aggregated_diff = torch.sum(diffs * weights, dim=-1)
+            
+            # Add Gaussian noise to the aggregated difference
+            noisy_aggregated_diff = add_gaussian_noise(
+                aggregated_diff,
+                sigma=self.sigma,
+                device=global_param.device
+            )
+            
+            # Update global parameters by subtracting noisy aggregated difference
+            self.public_model_params[name].data -= noisy_aggregated_diff
+        
+        # Update model state dict
+        self.model.load_state_dict(self.public_model_params, strict=False)
     
     
     def package(self, client_id: int):
