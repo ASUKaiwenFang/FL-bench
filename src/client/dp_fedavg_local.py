@@ -1,9 +1,8 @@
 from typing import Any, Iterator
 
 import torch
-import torch.func
-from torch.func import functional_call, grad, vmap
 from torch.utils.data import DataLoader
+from opacus import GradSampleModule
 
 from src.client.fedavg import FedAvgClient
 from src.utils.dp_mechanisms import (
@@ -13,11 +12,12 @@ from src.utils.dp_mechanisms import (
 
 
 class DPFedAvgLocalClient(FedAvgClient):
-    """Local Differential Privacy FedAvg Client with torch.func Per-Sample Gradients.
+    """Local Differential Privacy FedAvg Client with Opacus Per-Sample Gradients.
     
-    This client implements local differential privacy using modern torch.func
-    for efficient per-sample gradient computation. Uses vmap + grad for vectorized
-    gradient computation with significant performance improvements over manual loops.
+    This client implements local differential privacy using Opacus GradSampleModule
+    for efficient and compatible per-sample gradient computation. The GradSampleModule
+    automatically computes per-sample gradients during the backward pass, providing
+    excellent compatibility with complex models including BatchNorm layers.
     Each sample's gradients are computed and clipped independently,
     then averaged and noised before parameter updates.
     """
@@ -34,12 +34,29 @@ class DPFedAvgLocalClient(FedAvgClient):
     def set_parameters(self, package: dict[str, Any]):
         super().set_parameters(package)
         self.iter_trainloader = iter(self.trainloader)
+        # Wrap model with GradSampleModule for per-sample gradient computation
+        if not isinstance(self.model, GradSampleModule):
+            original_device = self.model.device
+            self.model = GradSampleModule(self.model)
+            # Preserve device attribute for compatibility
+            self.model.device = original_device
+            # Update parameter names after wrapping
+            self.regular_params_name = list(key for key, _ in self.model.named_parameters())
+            
+            # Update regular_model_params with new parameter names for return_diff mode
+            if self.return_diff:
+                from collections import OrderedDict
+                model_params = self.model.state_dict()
+                self.regular_model_params = OrderedDict(
+                    (key, model_params[key].clone().cpu())
+                    for key in self.regular_params_name
+                )
     
     def fit(self):
         """Train the model with local differential privacy using per-sample gradients.
         
-        This method implements the per-sample DP-SGD algorithm using torch.func:
-        1. Compute per-sample gradients using torch.func (vmap + grad)
+        This method implements the per-sample DP-SGD algorithm using Opacus:
+        1. Compute per-sample gradients using Opacus GradSampleModule
         2. Clip each sample's gradients independently
         3. Average the clipped gradients
         4. Add calibrated Gaussian noise
@@ -51,21 +68,14 @@ class DPFedAvgLocalClient(FedAvgClient):
         for _ in range(self.local_epoch):
             x, y = self.get_data_batch()
             
-            # Compute per-sample gradients using torch.func
-            per_sample_grads = self._compute_per_sample_gradients_torch_func(x, y)
+            # Compute per-sample gradients using Opacus
+            per_sample_grads = self._compute_per_sample_gradients_opacus(x, y)
             
-            # Clip gradients and add noise
-            final_grads = self._clip_and_noise_gradients(per_sample_grads)
+            # Clip per-sample gradients
+            clipped_grads = self._clip_per_sample_gradients_opacus(per_sample_grads)
             
-            # Clear existing gradients and apply final noisy gradients
-            self.optimizer.zero_grad()
-            
-            # Apply gradients to model parameters
-            for param_name, grad in final_grads.items():
-                for name, param in self.model.named_parameters():
-                    if name == param_name and param.requires_grad:
-                        param.grad = grad
-                        break
+            # Apply averaged gradients with noise
+            self._apply_gradients_with_noise_opacus(clipped_grads)
             
             # Optimizer step
             self.optimizer.step()
@@ -87,43 +97,12 @@ class DPFedAvgLocalClient(FedAvgClient):
             x, y = next(self.iter_trainloader)
         return x.to(self.device), y.to(self.device)
     
-    def _extract_model_params_and_buffers(self):
-        """Extract and detach model parameters and buffers for torch.func.
+    def _compute_per_sample_gradients_opacus(self, x, y):
+        """Compute per-sample gradients using Opacus GradSampleModule.
         
-        Returns:
-            tuple: (params_dict, buffers_dict) where both are detached parameter dictionaries
-        """
-        params = {k: v.detach() for k, v in self.model.named_parameters() if v.requires_grad}
-        buffers = {k: v.detach() for k, v in self.model.named_buffers()}
-        return params, buffers
-    
-    def _compute_single_sample_loss(self, params, buffers, sample, target):
-        """Compute loss for a single sample using functional_call.
-        
-        Args:
-            params: Parameter dictionary for the model
-            buffers: Buffer dictionary for the model  
-            sample: Single input sample tensor
-            target: Single target tensor
-            
-        Returns:
-            Scalar loss tensor for the sample
-        """
-        sample_batch = sample.unsqueeze(0)
-        target_batch = target.unsqueeze(0)
-        
-        # Use functional_call with strict=False to avoid issues with buffers that 
-        # have in-place operations like BatchNorm's num_batches_tracked
-        predictions = functional_call(self.model, (params, buffers), (sample_batch,), strict=False)
-        loss = self.criterion(predictions, target_batch)
-        return loss
-    
-    def _compute_per_sample_gradients_torch_func(self, x, y):
-        """Compute per-sample gradients using torch.func (vmap + grad).
-        
-        This method uses the modern torch.func approach with vmap for vectorized
-        gradient computation, providing significant performance improvements over
-        manual loops while maintaining mathematical correctness.
+        This method uses Opacus's GradSampleModule to automatically compute
+        per-sample gradients during the backward pass. This approach is more
+        stable than torch.func and handles BatchNorm layers correctly.
         
         Args:
             x: Input batch tensor [batch_size, ...]
@@ -133,80 +112,116 @@ class DPFedAvgLocalClient(FedAvgClient):
             dict: Dictionary mapping parameter names to per-sample gradient tensors
                  Each gradient tensor has shape [batch_size, *param_shape]
         """
-        params, buffers = self._extract_model_params_and_buffers()
+        self.optimizer.zero_grad()
         
-        # Create gradient computation function for single sample
-        grad_fn = grad(self._compute_single_sample_loss)
+        # Clear any existing grad_sample from previous iterations
+        for param in self.model.parameters():
+            if hasattr(param, 'grad_sample'):
+                param.grad_sample = None
         
-        # Vectorize across batch using vmap
-        # in_dims: (None, None, 0, 0) - params and buffers are not batched, x and y are batched along dim 0
-        vmap_grad_fn = vmap(grad_fn, in_dims=(None, None, 0, 0))
+        # Forward and backward pass
+        logits = self.model(x)
+        loss = self.criterion(logits, y)
+        loss.backward()
         
-        # Compute per-sample gradients for entire batch
-        per_sample_grads = vmap_grad_fn(params, buffers, x, y)
+        # Extract per-sample gradients from GradSampleModule
+        per_sample_grads = {}
+        for name, param in self.model.named_parameters():
+            if hasattr(param, 'grad_sample') and param.grad_sample is not None:
+                per_sample_grads[name] = param.grad_sample
         
         return per_sample_grads
     
-    def _clip_and_noise_gradients(self, per_sample_grads):
-        """Clip per-sample gradients and add noise using torch.func format.
+    def _clip_per_sample_gradients_opacus(self, per_sample_grads):
+        """Clip per-sample gradients using Opacus format.
         
         Args:
-            per_sample_grads: Dictionary of per-sample gradients from torch.func
+            per_sample_grads: Dictionary of per-sample gradients from Opacus
                             Each value has shape [batch_size, *param_shape]
                             
         Returns:
-            dict: Dictionary of parameter names to final noisy gradients ready for optimizer
+            dict: Dictionary of parameter names to clipped per-sample gradients
         """
+        if not per_sample_grads:
+            return {}
+            
         batch_size = next(iter(per_sample_grads.values())).shape[0]
         
-        # Clip each sample's gradients independently
+        # Compute per-sample gradient norms across all parameters
+        per_sample_norms = torch.zeros(batch_size, device=self.device)
+        
+        for param_grads in per_sample_grads.values():
+            # Flatten each sample's gradients and compute norm
+            for i in range(batch_size):
+                sample_grad = param_grads[i].flatten()
+                per_sample_norms[i] += sample_grad.norm().pow(2)
+        
+        per_sample_norms = per_sample_norms.sqrt()
+        
+        # Compute clipping factors
+        clipping_factors = torch.clamp(self.clip_norm / per_sample_norms, max=1.0)
+        
+        # Apply clipping
         clipped_grads = {}
         for param_name, param_grads in per_sample_grads.items():
             clipped_param_grads = []
-            
             for i in range(batch_size):
-                sample_grad = param_grads[i]
-                
-                # Compute L2 norm for this sample's gradient for this parameter
-                grad_norm = sample_grad.detach().norm().item()
-                
-                # Clip if necessary
-                if grad_norm > self.clip_norm:
-                    scaling_factor = self.clip_norm / grad_norm
-                    clipped_sample_grad = sample_grad * scaling_factor
-                else:
-                    clipped_sample_grad = sample_grad
-                    
-                clipped_param_grads.append(clipped_sample_grad)
-            
-            # Stack clipped gradients back into batch format
+                clipped_grad = param_grads[i] * clipping_factors[i]
+                clipped_param_grads.append(clipped_grad)
             clipped_grads[param_name] = torch.stack(clipped_param_grads, dim=0)
         
-        # Average across batch and add noise
-        final_grads = {}
+        return clipped_grads
+    
+    def _apply_gradients_with_noise_opacus(self, clipped_grads):
+        """Apply averaged gradients with noise using Opacus format.
+        
+        Args:
+            clipped_grads: Dictionary of clipped per-sample gradients
+        """
+        if not clipped_grads:
+            return
+        
+        # Average across batch and add noise, then apply to model parameters
         for param_name, clipped_param_grads in clipped_grads.items():
             # Average across batch dimension
             averaged_grad = clipped_param_grads.mean(dim=0)
             
             # Add Gaussian noise
-            if param_name in self.model.state_dict():
-                param_device = self.model.state_dict()[param_name].device
-            else:
-                param_device = self.device
-                
             noisy_grad = add_gaussian_noise(
                 averaged_grad,
                 sigma=self.sigma,
-                device=param_device
+                device=averaged_grad.device
             )
             
-            final_grads[param_name] = noisy_grad
-        
-        return final_grads
+            # Apply to corresponding parameter
+            for name, param in self.model.named_parameters():
+                if name == param_name and param.requires_grad:
+                    param.grad = noisy_grad
+                    break
+    
+    
+    
+    
 
     def package(self):
         """Package client data including DP parameters."""
         client_package = super().package()
+        
+        # Fix parameter names for GradSampleModule compatibility
+        # Remove '_module.' prefix from parameter names to match server expectations
+        if "regular_model_params" in client_package:
+            fixed_params = {}
+            for key, value in client_package["regular_model_params"].items():
+                new_key = key.replace("_module.", "") if key.startswith("_module.") else key
+                fixed_params[new_key] = value
+            client_package["regular_model_params"] = fixed_params
+        
+        if "model_params_diff" in client_package:
+            fixed_diff = {}
+            for key, value in client_package["model_params_diff"].items():
+                new_key = key.replace("_module.", "") if key.startswith("_module.") else key
+                fixed_diff[new_key] = value
+            client_package["model_params_diff"] = fixed_diff
         
         # Add DP parameters for server tracking
         client_package["dp_parameters"] = {
