@@ -12,7 +12,7 @@ dataset:
   name: mnist
 
 model:
-  name: lenet5
+  name: 2nn
 
   # Whether to use torchvision integrated model weights.
   # Has no effect if model is lenet5, 2nn or fedavgcnn

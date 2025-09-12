@@ -1,0 +1,121 @@
+
+
+
+% \newpage
+\begin{algorithm}[H]
+\caption{DP-ScaffStein \colorbox{yellow}{(DP noise at the {\color{red}last} local step and JSE at the server)}}
+\label{algo:scaffstein_1}
+\begin{algorithmic}[1]
+\State \textbf{Input:} initial $x^0$, $c_i^0$ for $i \in [N]$ and $c^0$, global and local step sizes ($\eta_g$, $\eta_\ell$), DP noise scale $\sigma_g$, and clipping threshold $\mathcal{C}$.
+\For{each round $r \in [R]$}
+\State Sample clients $\mathcal{S} \subseteq [N]$ of size $S$
+\State Communicate $(x^{r-1}, c^{r-1})$ to all clients $i \in \mathcal{S}$
+\ForAll{clients $i \in \mathcal{S}$ \textbf{in parallel}}
+\State Initialize local model: $y_{i,0}^{r} \gets x^{r-1}$
+\For{$k \in [K]$}
+\State Sample mini-batch data $\mathcal{B}$ of size $b$.
+\State \colorbox{yellow}{Clip the per-example gradient:}
+\For{$j \in \mathcal{B}$}  
+\State $g_{ij}(y^r_{i,k-1}) \gets g_{ij}(y^r_{i,k-1}) / \max \{1, \ \|g_{ij}(y^r_{i,k-1})\|/\mathcal{C}\} $
+\EndFor
+\State \colorbox{yellow}{Compute the mini-batch gradient:}
+$g_{i}(y_{i,k-1}^{r}) \gets \frac{1}{b} \sum_{j \in \mathcal{B}} g_{ij}(y_{i,k-1}^{r})$.
+\State \colorbox{yellow}{Local update:} $y_{i,k}^{r} \gets y_{i,k-1}^{r} - \eta_\ell (g_i(y_{i,k-1}^{r}) - c_i^{r-1} + c^{r-1})$
+\EndFor
+\State \colorbox{yellow}{Add DP noise:}  $A_i \gets (y_{i,K}^{r} - x^{r-1}) + \xi_i$ where $\xi_i \sim \mathcal{N}(0, \sigma_{DP}^2 I_d)$ with \colorbox{yellow}{$\sigma_{DP}:=  \mathcal{C} K \eta_l \sigma_g/b$}
+\State \colorbox{yellow}{Control variate update:} $c_i^r \gets c_i^{r-1} - c^{r-1} - \frac{1}{K \eta_\ell}A_i$
+\State Communicate $(\Delta y_i,\Delta c_i) \gets (A_i, - c^{r-1} - \frac{1}{K \eta_\ell}A_i)$ 
+\EndFor
+\State $a^{r-1} \gets \frac{1}{S} \sum_{i \in \mathcal{S}} \Delta y_i$
+\State \colorbox{yellow}{Apply JSE:} $\Delta x \gets  \left( 1 - \frac{(d-2)\sigma_{DP}^2/S}{\|a^{r-1}\|^2} \right) a^{r-1}$
+\State $\Delta c \gets \frac{1}{S} \sum_{i \in \mathcal{S}} \Delta c_i$
+\State $x^r \gets x^{r-1} + \eta_g \Delta x$
+\State $c^r \gets c^{r-1} +\frac{S}{N}\Delta c$
+\EndFor
+\State \textbf{Output:} $x^R$
+\end{algorithmic}
+\end{algorithm}
+
+Recall that the sensitivity of the mini-batch gradient:
+\begin{align}
+    \| g (D) - g(D') \| \leq \frac{\mathcal{C}}{b} := S_g
+\end{align}
+Then what is the sensitivity of the model parameter $y_K$?
+\begin{align*}
+\|y_K(D) - y_K(D') \| & = \| \left(y_{K-1}(D) - \eta_l g(D) \right) - \left(y_{K-1}(D') - \eta_l g(D') \right) \|     \\
+& \leq \|  \left(y_{K-1}(D) - y_{K-1}(D') \| + \eta_l \| g(D) - g(D')\| \\
+& \leq \eta_l K \mathcal{C} /b := S_y
+\end{align*}
+
+
+
+\begin{algorithm}[H]
+\caption{DP-ScaffStein \colorbox{yellow}{(DP noise and JSE at {\color{red}each} local step)}}
+\label{algo:scaffstein_2}
+\begin{algorithmic}[1]
+\State \textbf{Input:} initial $x^0$, $c_i^0$ for $i \in [N]$ and $c^0$, global and local step sizes ($\eta_g$, $\eta_\ell$), DP noise scale $\sigma_g$, and clipping threshold $\mathcal{C}$.
+\For{each round $r \in [R]$}
+\State Sample clients $\mathcal{S} \subseteq [N]$ of size $S$
+\State Communicate $(x^{r-1}, c^{r-1})$ to all clients $i \in \mathcal{S}$
+\ForAll{clients $i \in \mathcal{S}$ \textbf{in parallel}}
+\State Initialize local model: $y_{i,0}^{r} \gets x^{r-1}$
+\For{$k \in [K]$}
+\State Sample mini-batch data $\mathcal{B}$ of size $b$.
+\State \colorbox{yellow}{Clip the per-example gradient:}
+\For{$j \in \mathcal{B}$}  
+\State $g_{ij}(y^r_{i,k-1}) \gets g_{ij}(y^r_{i,k-1}) / \max \{1, \ \|g_{ij}(y^r_{i,k-1})\|/\mathcal{C}\} $
+\EndFor
+\State \colorbox{yellow}{Compute the mini-batch gradient:}
+$g_{i}(y_{i,k-1}^{r}) \gets \frac{1}{b} \sum_{j \in \mathcal{B}} g_{ij}(y_{i,k-1}^{r})$. 
+\State \colorbox{yellow}{Add DP noise:}  $A_i \gets g_i(y_{i,k-1}^{r}) +  \xi_{ik}$ where $\xi_{ik} \sim \mathcal{N}(0,  \sigma_{DP}^2 I_d)$ with \colorbox{yellow}{$\sigma_{DP}:= \mathcal{C} \sigma_g/b$}
+\State \colorbox{yellow}{Apply JSE:} $a_i \gets \left( 1 - \frac{(d-2)\sigma_{DP}^2}{\|A_i\|^2} \right) A_i$
+\State \colorbox{yellow}{Parameter update:} $y_{i,k}^{r} \gets y_{i,k-1}^{r} - \eta_\ell (a_i - c_i^{r-1} + c^{r-1})$
+\EndFor
+\State \colorbox{yellow}{Control variate update:}  $c_i^r \gets c_i^{r-1} - c^{r-1} - \frac{1}{K \eta_\ell} ( y_{i,K}^r - x^{r-1} )$
+\State Communicate $(\Delta y_i,\Delta c_i) \gets \left(y_{i,K}^r - x^{r-1}, \quad - c^{r-1} - \frac{1}{K \eta_\ell} ( y_{i,K}^r - x^{r-1} ) \right)$ 
+\EndFor
+\State $\Delta x  \gets \frac{1}{S} \sum_{i \in \mathcal{S}} \Delta y_i$
+\State $\Delta c \gets \frac{1}{S} \sum_{i \in \mathcal{S}} \Delta c_i$
+\State $x^r \gets x^{r-1} + \eta_g \Delta x$
+\State $c^r \gets c^{r-1} +\frac{S}{N}\Delta c$
+\EndFor
+\State \textbf{Output:} $x^R$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{DP-ScaffStein \colorbox{yellow}{(DP noise at {\color{red}each} local step and JSE at the {\color{red}last} local step)}}
+\label{algo:scaffstein_3}
+\begin{algorithmic}[1]
+\State \textbf{Input:} initial $x^0$, $c_i^0$ for $i \in [N]$ and $c^0$, global and local step sizes ($\eta_g$, $\eta_\ell$), DP noise scale $\sigma_g$, and clipping threshold $\mathcal{C}$.
+\For{each round $r \in [R]$}
+\State Sample clients $\mathcal{S} \subseteq [N]$ of size $S$
+\State Communicate $(x^{r-1}, c^{r-1})$ to all clients $i \in \mathcal{S}$
+\ForAll{clients $i \in \mathcal{S}$ \textbf{in parallel}}
+\State Initialize local model: $y_{i,0}^{r} \gets x^{r-1}$
+\For{$k \in [K]$}
+\State Sample mini-batch data $\mathcal{B}$ of size $b$.
+\State \colorbox{yellow}{Clip the per-example gradient:}
+\For{$j \in \mathcal{B}$}  
+\State $g_{ij}(y^r_{i,k-1}) \gets g_{ij}(y^r_{i,k-1}) / \max \{1, \ \|g_{ij}(y^r_{i,k-1})\|/\mathcal{C}\} $
+\EndFor
+\State \colorbox{yellow}{Compute the mini-batch gradient:}
+$g_{i}(y_{i,k-1}^{r}) \gets \frac{1}{b} \sum_{j \in \mathcal{B}} g_{ij}(y_{i,k-1}^{r})$. 
+\State \colorbox{yellow}{Add DP noise:}  $A_i \gets g_i(y_{i,k-1}^{r}) +  \xi_{ik}$ where $\xi_{ik} \sim \mathcal{N}(0,  \sigma_{DP}^2 I_d)$ with \colorbox{yellow}{$\sigma_{DP}:= \mathcal{C} \sigma_g/b$}
+\State \colorbox{yellow}{Parameter update:} $y_{i,k}^{r} \gets y_{i,k-1}^{r} - \eta_\ell (A_i - c_i^{r-1} + c^{r-1})$
+\EndFor
+\State Set $A_i \gets y^r_{i,K} - x^{r-1}$
+\State \colorbox{yellow}{Apply JSE:}  $a_i \gets \left( 1 - \frac{(d-2)K\sigma_{DP}^2}{\|A_i\|^2} \right) A_i$
+\State \colorbox{yellow}{Control variate update:}  $c_i^r \gets c_i^{r-1} - c^{r-1} - \frac{1}{K \eta_\ell} ( y_{i,K}^r - x^{r-1} )$
+\State Communicate $(\Delta y_i,\Delta c_i) \gets \left(y_{i,K}^r - x^{r-1}, \quad - c^{r-1} - \frac{1}{K \eta_\ell} ( y_{i,K}^r - x^{r-1} ) \right)$ 
+\EndFor
+\State $\Delta x  \gets \frac{1}{S} \sum_{i \in \mathcal{S}} \Delta y_i$
+\State $\Delta c \gets \frac{1}{S} \sum_{i \in \mathcal{S}} \Delta c_i$
+\State $x^r \gets x^{r-1} + \eta_g \Delta x$
+\State $c^r \gets c^{r-1} +\frac{S}{N}\Delta c$
+\EndFor
+\State \textbf{Output:} $x^R$
+\end{algorithmic}
+\end{algorithm}
+
+ 

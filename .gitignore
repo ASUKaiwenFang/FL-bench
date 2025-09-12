@@ -47,3 +47,4 @@ data/domain/raw
 *.pt
 
 .venv/
+CLAUDE.md
