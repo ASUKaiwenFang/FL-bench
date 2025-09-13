@@ -136,6 +136,7 @@ class DPFedAvgLocalClient(FedAvgClient):
         """
         Clip per-sample gradients and add noise using Opacus approach.
         Operates directly on param.grad_sample and sets param.grad.
+        Noise standard deviation follows the formula: σ_DP = C * σ_g / b
         """
         # Compute per-sample norms
         per_sample_norms = self._compute_per_sample_norms_opacus()
@@ -147,7 +148,9 @@ class DPFedAvgLocalClient(FedAvgClient):
         per_sample_clip_factor = (
             self.clip_norm / (per_sample_norms + 1e-6)
         ).clamp(max=1.0)
-        
+        # Calculate DP noise standard deviation: σ_DP = C * σ_g / b
+        batch_size = per_sample_norms.size(0)
+        sigma_dp = self.clip_norm * self.sigma / batch_size
         # Apply clipping and noise to each parameter
         for param in self.model.parameters():
             if hasattr(param, 'grad_sample') and param.grad_sample is not None:
@@ -158,7 +161,7 @@ class DPFedAvgLocalClient(FedAvgClient):
                 
                 # Add Gaussian noise using Opacus _generate_noise
                 noisy_grad = clipped_grad + _generate_noise(
-                    std=self.sigma,
+                    std=sigma_dp,
                     reference=clipped_grad,
                     generator=None,
                     secure_mode=False
