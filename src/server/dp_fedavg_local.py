@@ -31,9 +31,12 @@ class DPFedAvgLocalServer(FedAvgServer):
                            help="Gradient clipping norm")
         parser.add_argument("--sigma", type=float, default=0.1,
                            help="Noise standard deviation")
+        parser.add_argument("--algorithm_variant", type=str, 
+                           choices=["last_noise", "step_noise"], default="step_noise",
+                           help="Algorithm variant: last_noise (parameter-level) or step_noise (gradient-level)")
         parser.add_argument("--noise_mode", type=str, 
                            choices=["gradient", "parameter"], default="gradient",
-                           help="Where to add DP noise: gradient (during training) or parameter (before return)")
+                           help="Where to add DP noise: gradient (during training) or parameter (before return) - deprecated, use algorithm_variant")
         
         return parser.parse_args(args_list)
     
@@ -52,4 +55,9 @@ class DPFedAvgLocalServer(FedAvgServer):
     def package(self, client_id: int):
         """Package parameters for client training."""
         return super().package(client_id)
+
+
+# Create an alias for main.py's naming convention compatibility
+# main.py expects class name to match "method_name + server" pattern
+Dp_fedavg_localServer = DPFedAvgLocalServer
     

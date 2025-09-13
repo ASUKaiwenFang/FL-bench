@@ -17,7 +17,17 @@ class DPFedAvgLocalClient(FedAvgClient):
     excellent compatibility with complex models including BatchNorm layers.
     Each sample's gradients are computed and clipped independently,
     then averaged and noised before parameter updates.
+    
+    Supports two algorithm variants:
+    - step_noise: Add noise to gradients at each training step (current implementation)
+    - last_noise: Add noise to parameter differences after training completion
     """
+    
+    # Define algorithm variant constants
+    ALGORITHM_VARIANTS = {
+        'last_noise': 1,
+        'step_noise': 2
+    }
     
     def __init__(self, **commons):
         super().__init__(**commons)
@@ -26,6 +36,13 @@ class DPFedAvgLocalClient(FedAvgClient):
         # Initialize DP parameters
         self.clip_norm = self.args.dp_fedavg_local.clip_norm
         self.sigma = self.args.dp_fedavg_local.sigma
+        
+        # Support string or numeric configuration
+        variant_config = getattr(self.args.dp_fedavg_local, 'algorithm_variant', 'step_noise')
+        if isinstance(variant_config, str):
+            self.algorithm_variant = self.ALGORITHM_VARIANTS[variant_config]
+        else:
+            self.algorithm_variant = variant_config
         
     
     def set_parameters(self, package: dict[str, Any]):
@@ -51,6 +68,20 @@ class DPFedAvgLocalClient(FedAvgClient):
     
     def fit(self):
         """Train the model with local differential privacy using per-sample gradients.
+        
+        Supports two algorithm variants:
+        - step_noise: Add noise to gradients at each training step
+        - last_noise: Add noise to parameter differences after training completion
+        """
+        if self.algorithm_variant == 1:  # last_noise
+            return self._last_noise_training()
+        elif self.algorithm_variant == 2:  # step_noise
+            return self._step_noise_training()
+        else:
+            raise ValueError(f"Unknown algorithm variant: {self.algorithm_variant}")
+    
+    def _step_noise_training(self):
+        """Gradient-level noise addition (original implementation).
         
         This method implements the per-sample DP-SGD algorithm using Opacus:
         1. Forward pass (GradSampleModule automatically computes per-sample gradients)
@@ -86,6 +117,75 @@ class DPFedAvgLocalClient(FedAvgClient):
             
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
+    
+    def _last_noise_training(self):
+        """Parameter-level noise addition.
+        
+        Train without noise, then add noise to parameter differences.
+        Uses noise standard deviation: σ_DP = C * K * η_l * σ_g / b
+        """
+        self.model.train()
+        self.dataset.train()
+        
+        # Store initial parameters for difference calculation
+        initial_params = {
+            name: param.clone().detach()
+            for name, param in self.model.named_parameters()
+        }
+        
+        # Standard training without noise
+        for _ in range(self.local_epoch):
+            x, y = self.get_data_batch()
+            
+            # Standard forward+backward pass without DP noise
+            self.optimizer.zero_grad()
+            logits = self.model(x)
+            loss = self.criterion(logits, y)
+            loss.backward()
+            self.optimizer.step()
+            
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
+        
+        # Add noise to parameter differences
+        self._add_parameter_level_noise(initial_params)
+    
+    def _add_parameter_level_noise(self, initial_params):
+        """Add noise to parameter differences for last_noise variant.
+        
+        Uses noise standard deviation: σ_DP = C * K * η_l * σ_g / b
+        where C = clip_norm, K = local_epoch, η_l = learning_rate, σ_g = sigma, b = batch_size
+        """
+        # Get batch size from last training batch (approximate)
+        try:
+            x, y = self.get_data_batch()
+            batch_size = len(x)
+        except:
+            # Fallback to a reasonable default
+            batch_size = 32
+        
+        # Calculate noise standard deviation for parameter-level noise
+        # σ_DP = C * K * η_l * σ_g / b
+        learning_rate = self.args.optimizer.lr
+        K = self.local_epoch
+        sigma_dp = self.clip_norm * K * learning_rate * self.sigma / batch_size
+        
+        # Add noise to parameter differences
+        for name, param in self.model.named_parameters():
+            if name in initial_params:
+                # Calculate parameter difference
+                param_diff = param.data - initial_params[name]
+                
+                # Add Gaussian noise to the difference
+                noise = _generate_noise(
+                    std=sigma_dp,
+                    reference=param_diff,
+                    generator=None,
+                    secure_mode=False
+                )
+                
+                # Apply noisy difference: param = initial + (diff + noise)
+                param.data = initial_params[name] + param_diff + noise
     
     def get_data_batch(self):
         # Initialize iterator if not already done

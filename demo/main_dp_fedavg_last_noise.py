@@ -1,21 +1,39 @@
+#!/usr/bin/env python3
+"""
+DP-FedAvg Last Noise Variant Demo
+==================================
+
+This script demonstrates the last_noise variant of DP-FedAvg, which adds
+differential privacy noise to parameter differences after training completion.
+
+Algorithm: Parameter-level noise addition
+- Noise position: Added to parameter differences after local training
+- Noise standard deviation: σ_DP = C × K × η_l × σ_g / b
+- Training: Standard training followed by noise addition
+
+Usage:
+    python demo/main_dp_fedavg_last_noise.py
+
+Author: FL-bench DP Methods Implementation
+"""
+
 import importlib
 import inspect
 import sys
 from pathlib import Path
 
+FLBENCH_ROOT = Path(__file__).parent.parent.absolute()
+if FLBENCH_ROOT not in sys.path:
+    sys.path.append(FLBENCH_ROOT.as_posix())
+
 import hydra
 from omegaconf import DictConfig
 
 from src.server.fedavg import FedAvgServer
-
-FLBENCH_ROOT = Path(__file__).parent.absolute()
-if FLBENCH_ROOT not in sys.path:
-    sys.path.append(FLBENCH_ROOT.as_posix())
-
 from src.utils.functional import parse_args
 
 
-@hydra.main(config_path="config", config_name="dp_fedavg_central_auto", version_base=None)
+@hydra.main(config_path="config", config_name="dp_fedavg_last_noise", version_base=None)
 def main(config: DictConfig):
     method_name = config.method.lower()
 
