@@ -55,7 +55,7 @@ class DPFedAvgLocalServer(FedAvgServer):
                 ],
                 dim=-1,
             )
-
+            aggregated = torch.sum(diffs * weights, dim=-1)
             self.public_model_params[name].data += self.args.dp_fedavg_local.global_lr * aggregated
         self.model.load_state_dict(self.public_model_params, strict=False)
     
