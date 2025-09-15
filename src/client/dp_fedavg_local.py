@@ -1,10 +1,10 @@
 from typing import Any, Iterator
-
+from copy import deepcopy
 import torch
 from torch.utils.data import DataLoader
 from opacus import GradSampleModule
 from opacus.optimizers.optimizer import _generate_noise
-
+from collections import OrderedDict
 from src.client.fedavg import FedAvgClient
 
 
@@ -32,11 +32,13 @@ class DPFedAvgLocalClient(FedAvgClient):
     def __init__(self, **commons):
         super().__init__(**commons)
         self.iter_trainloader = None
-        
+
         # Initialize DP parameters
         self.clip_norm = self.args.dp_fedavg_local.clip_norm
         self.sigma = self.args.dp_fedavg_local.sigma
-        
+        self.sigma_dp = None
+        self.dp_processed_diff = None
+
         # Support string or numeric configuration
         variant_config = getattr(self.args.dp_fedavg_local, 'algorithm_variant', 'step_noise')
         if isinstance(variant_config, str):
@@ -48,6 +50,10 @@ class DPFedAvgLocalClient(FedAvgClient):
     def set_parameters(self, package: dict[str, Any]):
         super().set_parameters(package)
         self.iter_trainloader = iter(self.trainloader)
+
+        # Reset DP processed difference for new training round
+        self.dp_processed_diff = None
+
         # Wrap model with GradSampleModule for per-sample gradient computation
         if not isinstance(self.model, GradSampleModule):
             original_device = self.model.device
@@ -56,27 +62,26 @@ class DPFedAvgLocalClient(FedAvgClient):
             self.model.device = original_device
             # Update parameter names after wrapping
             self.regular_params_name = list(key for key, _ in self.model.named_parameters())
-            
-            # Update regular_model_params with new parameter names for return_diff mode
-            if self.return_diff:
-                from collections import OrderedDict
-                model_params = self.model.state_dict()
-                self.regular_model_params = OrderedDict(
-                    (key, model_params[key].clone().cpu())
-                    for key in self.regular_params_name
-                )
+
+            # Force re-save parameters with wrapped parameter names for consistency
+            model_params = self.model.state_dict()
+            self.regular_model_params = OrderedDict(
+                (key, model_params[key].clone().cpu())
+                for key in self.regular_params_name
+            )
+
     
     def fit(self):
         """Train the model with local differential privacy using per-sample gradients.
-        
+
         Supports two algorithm variants:
         - step_noise: Add noise to gradients at each training step
         - last_noise: Add noise to parameter differences after training completion
         """
         if self.algorithm_variant == 1:  # last_noise
-            return self._last_noise_training()
+            self._last_noise_training()
         elif self.algorithm_variant == 2:  # step_noise
-            return self._step_noise_training()
+            self._step_noise_training()
         else:
             raise ValueError(f"Unknown algorithm variant: {self.algorithm_variant}")
     
@@ -96,23 +101,14 @@ class DPFedAvgLocalClient(FedAvgClient):
         for _ in range(self.local_epoch):
             x, y = self.get_data_batch()
             
-            # Standard Opacus forward+backward pass
             self.optimizer.zero_grad()
-            
-            # Clear any existing grad_sample from previous iterations
             for param in self.model.parameters():
                 if hasattr(param, 'grad_sample'):
                     param.grad_sample = None
-            
-            # Forward and backward pass - GradSampleModule automatically computes per-sample gradients
             logits = self.model(x)
             loss = self.criterion(logits, y)
             loss.backward()
-            
-            # Apply DP processing: clip and add noise
             self._clip_and_add_noise_opacus()
-            
-            # Optimizer step
             self.optimizer.step()
             
             if self.lr_scheduler is not None:
@@ -120,89 +116,53 @@ class DPFedAvgLocalClient(FedAvgClient):
     
     def _last_noise_training(self):
         """Parameter-level noise addition.
-        
+
         Train without noise, then add noise to parameter differences.
         Uses noise standard deviation: σ_DP = C * K * η_l * σ_g / b
         """
         self.model.train()
         self.dataset.train()
-        
-        # Store initial parameters for difference calculation
-        initial_params = {
-            name: param.clone().detach()
-            for name, param in self.model.named_parameters()
-        }
-        
+
+
         # Standard training without noise
         for _ in range(self.local_epoch):
             x, y = self.get_data_batch()
-            
-            # Standard forward+backward pass without DP noise
+
             self.optimizer.zero_grad()
+            for param in self.model.parameters():
+                if hasattr(param, 'grad_sample'):
+                    param.grad_sample = None
             logits = self.model(x)
             loss = self.criterion(logits, y)
             loss.backward()
+            self._clip_gradients()
             self.optimizer.step()
-            
+
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
-        
-        # Add noise to parameter differences
-        self._add_parameter_level_noise(initial_params)
-    
-    def _add_parameter_level_noise(self, initial_params):
-        """Add noise to parameter differences for last_noise variant.
-        
-        Uses noise standard deviation: σ_DP = C * K * η_l * σ_g / b
-        where C = clip_norm, K = local_epoch, η_l = learning_rate, σ_g = sigma, b = batch_size
-        """
-        # Get batch size from last training batch (approximate)
-        try:
-            x, y = self.get_data_batch()
-            batch_size = len(x)
-        except:
-            # Fallback to a reasonable default
-            batch_size = 32
-        
-        # Calculate noise standard deviation for parameter-level noise
+
+
+        batch_size = len(x)
         # σ_DP = C * K * η_l * σ_g / b
-        learning_rate = self.args.optimizer.lr
-        K = self.local_epoch
-        sigma_dp = self.clip_norm * K * learning_rate * self.sigma / batch_size
-        
-        # Add noise to parameter differences
+        sigma_dp = self.clip_norm * self.local_epoch * self.args.optimizer.lr * self.sigma / batch_size
+        self.sigma_dp = sigma_dp
+
+        # Calculate noisy parameter differences and store them
+        self.dp_processed_diff = {}
+
         for name, param in self.model.named_parameters():
-            if name in initial_params:
-                # Calculate parameter difference
-                param_diff = param.data - initial_params[name]
-                
-                # Add Gaussian noise to the difference
+            if name in self.regular_model_params:
+                param_diff = param.data - self.regular_model_params[name].to(param.device)
                 noise = _generate_noise(
                     std=sigma_dp,
                     reference=param_diff,
                     generator=None,
                     secure_mode=False
                 )
-                
-                # Apply noisy difference: param = initial + (diff + noise)
-                param.data = initial_params[name] + param_diff + noise
-    
-    def get_data_batch(self):
-        # Initialize iterator if not already done
-        if self.iter_trainloader is None:
-            self.iter_trainloader = iter(self.trainloader)
-            
-        try:
-            x, y = next(self.iter_trainloader)
-            if len(x) <= 1:
-                x, y = next(self.iter_trainloader)
-        except StopIteration:
-            self.iter_trainloader = iter(self.trainloader)
-            x, y = next(self.iter_trainloader)
-        return x.to(self.device), y.to(self.device)
-    
-    
-    
+                noisy_diff = param_diff + noise
+                clean_name = self._get_clean_param_name(name)
+                self.dp_processed_diff[clean_name] = noisy_diff.clone().cpu()
+
     def _compute_per_sample_norms_opacus(self):
         """
         Compute per-sample gradient norms using Opacus approach.
@@ -232,6 +192,19 @@ class DPFedAvgLocalClient(FedAvgClient):
         
         return per_sample_norms
     
+    def _clip_gradients(self):
+        """Clip per-sample gradients without adding noise."""
+        per_sample_norms = self._compute_per_sample_norms_opacus()
+        if len(per_sample_norms) == 0:
+            return
+        per_sample_clip_factor = (
+            self.clip_norm / (per_sample_norms + 1e-6)
+        ).clamp(max=1.0)
+        for param in self.model.parameters():
+            if hasattr(param, 'grad_sample') and param.grad_sample is not None:
+                clipped_grad = torch.einsum("i,i...", per_sample_clip_factor, param.grad_sample)
+                param.grad = clipped_grad
+                
     def _clip_and_add_noise_opacus(self):
         """
         Clip per-sample gradients and add noise using Opacus approach.
@@ -251,6 +224,7 @@ class DPFedAvgLocalClient(FedAvgClient):
         # Calculate DP noise standard deviation: σ_DP = C * σ_g / b
         batch_size = per_sample_norms.size(0)
         sigma_dp = self.clip_norm * self.sigma / batch_size
+        self.sigma_dp = sigma_dp
         # Apply clipping and noise to each parameter
         for param in self.model.parameters():
             if hasattr(param, 'grad_sample') and param.grad_sample is not None:
@@ -272,29 +246,71 @@ class DPFedAvgLocalClient(FedAvgClient):
     
     
     def package(self):
-        """Package client data including DP parameters."""
-        client_package = super().package()
-        
-        # Fix parameter names for GradSampleModule compatibility
-        # Remove '_module.' prefix from parameter names to match server expectations
-        if "regular_model_params" in client_package:
-            fixed_params = {}
-            for key, value in client_package["regular_model_params"].items():
-                new_key = key.replace("_module.", "") if key.startswith("_module.") else key
-                fixed_params[new_key] = value
-            client_package["regular_model_params"] = fixed_params
-        
-        if "model_params_diff" in client_package:
-            fixed_diff = {}
-            for key, value in client_package["model_params_diff"].items():
-                new_key = key.replace("_module.", "") if key.startswith("_module.") else key
-                fixed_diff[new_key] = value
-            client_package["model_params_diff"] = fixed_diff
-        
-        # Add DP parameters for server tracking
-        client_package["dp_parameters"] = {
-            "clip_norm": self.clip_norm,
-            "sigma": self.sigma
-        }
-        
+        """Package client data including DP parameters.
+
+        Optimized implementation that avoids redundant calculations
+        based on the algorithm variant.
+        """
+
+        # Common package components
+        model_params = self.model.state_dict()
+        client_package = dict(
+            weight=len(self.trainset),
+            eval_results=self.eval_results,
+            personal_model_params={
+                key: model_params[key].clone().cpu()
+                for key in self.personal_params_name
+            },
+            optimizer_state=deepcopy(self.optimizer.state_dict()),
+            lr_scheduler_state=(
+                {} if self.lr_scheduler is None
+                else deepcopy(self.lr_scheduler.state_dict())
+            ),
+            sigma_dp=self.sigma_dp
+        )
+
+        self.package_for_algorithm_variant(client_package)
+
         return client_package
+    
+    def package_for_algorithm_variant(self, client_package: dict):
+        if self.algorithm_variant == 1:  # last_noise
+            # Use precomputed noisy differences
+            client_package["model_params_diff"] = self.dp_processed_diff
+        else:  # step_noise
+            # Compute differences with parameter name cleaning
+            client_package["model_params_diff"] = self._compute_clean_diff()
+    
+    def get_data_batch(self):
+        # Initialize iterator if not already done
+        if self.iter_trainloader is None:
+            self.iter_trainloader = iter(self.trainloader)
+            
+        try:
+            x, y = next(self.iter_trainloader)
+            if len(x) <= 1:
+                x, y = next(self.iter_trainloader)
+        except StopIteration:
+            self.iter_trainloader = iter(self.trainloader)
+            x, y = next(self.iter_trainloader)
+        return x.to(self.device), y.to(self.device)
+
+    def _get_clean_param_name(self, name: str) -> str:
+        """Remove _module. prefix from parameter names for compatibility."""
+        return name.replace("_module.", "") if name.startswith("_module.") else name
+
+    def _compute_clean_diff(self):
+        """Compute model parameter differences with clean parameter names."""
+        model_params = self.model.state_dict()
+        clean_diff = {}
+
+        for key in self.regular_params_name:
+
+            if key in self.regular_model_params:
+                param_old = self.regular_model_params[key]
+                param_new = model_params[key]
+
+                clean_key = self._get_clean_param_name(key)
+                clean_diff[clean_key] = (param_new - param_old)
+
+        return clean_diff

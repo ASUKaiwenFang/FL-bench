@@ -26,8 +26,8 @@ model:
 # Training settings
 common:
   seed: 42
-  join_ratio: 0.1
-  global_epoch: 10
+  join_ratio: 0.01
+  global_epoch: 50
   local_epoch: 5
   batch_size: 32
 
@@ -40,5 +40,5 @@ dp_fedavg_local:
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.01
+  lr: 0.1
   momentum: 0.9

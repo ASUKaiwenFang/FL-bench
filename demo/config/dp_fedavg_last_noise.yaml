@@ -27,7 +27,7 @@ model:
 common:
   seed: 42
   join_ratio: 0.1
-  global_epoch: 20
+  global_epoch: 100
   local_epoch: 5
   batch_size: 32
 
@@ -35,7 +35,7 @@ common:
 dp_fedavg_local:
   algorithm_variant: "last_noise"  # Parameter-level noise addition
   clip_norm: 1.0                   # Gradient clipping threshold
-  sigma: 0.1                       # Noise standard deviation parameter
+  sigma: 0.001                       # Noise standard deviation parameter
 
 # Optimizer settings
 optimizer:
