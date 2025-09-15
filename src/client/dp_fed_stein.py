@@ -118,6 +118,9 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         # Execute standard step-wise DP training (JSE-compatible version)
         self._step_noise_training()
 
+        # Initialize dp_processed_diff for parameter difference storage
+        self.dp_processed_diff = {}
+
         for name, param in self.model.named_parameters():
             if name in self.regular_model_params:
                 param_diff = param.data - self.regular_model_params[name].to(param.device)

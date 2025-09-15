@@ -27,7 +27,7 @@ model:
 common:
   seed: 42
   join_ratio: 0.1
-  global_epoch: 10
+  global_epoch: 100
   local_epoch: 5
   batch_size: 32
 

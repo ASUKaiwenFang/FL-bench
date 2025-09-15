@@ -43,6 +43,25 @@ class DPFedAvgLocalServer(FedAvgServer):
     
     def __init__(self, args: DictConfig):
         super().__init__(args)
+
+    def _get_global_lr(self):
+        """Get global_lr parameter with backward compatibility.
+
+        Checks for method-specific config first, then falls back to dp_fedavg_local config.
+        """
+        # Try to get method-specific config first (e.g., dp_fed_stein.global_lr)
+        method_name = self.args.method
+        if hasattr(self.args, method_name):
+            method_config = getattr(self.args, method_name)
+            if hasattr(method_config, 'global_lr'):
+                return method_config.global_lr
+
+        # Fall back to dp_fedavg_local config
+        if hasattr(self.args, 'dp_fedavg_local') and hasattr(self.args.dp_fedavg_local, 'global_lr'):
+            return self.args.dp_fedavg_local.global_lr
+
+        # Default fallback
+        return 1.0
         
     def aggregate_client_updates(self, client_packages: OrderedDict[int, Dict[str, Any]]):
         client_weights = [package["weight"] for package in client_packages.values()]
@@ -56,7 +75,7 @@ class DPFedAvgLocalServer(FedAvgServer):
                 dim=-1,
             )
             aggregated = torch.sum(diffs * weights, dim=-1)
-            self.public_model_params[name].data += self.args.dp_fedavg_local.global_lr * aggregated
+            self.public_model_params[name].data += self._get_global_lr() * aggregated
         self.model.load_state_dict(self.public_model_params, strict=False)
     
     

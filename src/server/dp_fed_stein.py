@@ -30,6 +30,7 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         parser = ArgumentParser()
 
         # DP parameters (inherited from parent)
+        parser.add_argument("--global_lr", type=float, default=1.0)
         parser.add_argument("--clip_norm", type=float, default=1.0,
                            help="Gradient clipping norm")
         parser.add_argument("--sigma", type=float, default=0.1,
@@ -98,6 +99,7 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         # Extract noise variance from first client package (should be same for all)
         noise_variance = list(client_packages.values())[0]["sigma_dp"]
         k_factor = 1/int(self.client_num * self.args.common.join_ratio)
+        global_lr = self.args.dp_fed_stein.global_lr
 
         # Apply global JSE to the aggregated parameter differences
         JSEProcessor.apply_global_jse_to_parameter_diff(
@@ -106,7 +108,7 @@ class DPFedSteinServer(DPFedAvgLocalServer):
 
         # Step 4: Update global model parameters with JSE-processed differences
         for name, global_param in self.public_model_params.items():
-            self.public_model_params[name].data -= aggregated_diff[name]
+            self.public_model_params[name].data += global_lr * aggregated_diff[name]
 
         # Step 5: Load updated parameters into model
         self.model.load_state_dict(self.public_model_params, strict=False)
