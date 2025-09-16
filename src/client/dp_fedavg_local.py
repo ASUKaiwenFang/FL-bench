@@ -110,9 +110,11 @@ class DPFedAvgLocalClient(FedAvgClient):
             loss.backward()
             self._clip_and_add_noise_opacus()
             self.optimizer.step()
-            
+
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
+
+        self._step_noise_post_processing()
     
     def _last_noise_training(self):
         """Parameter-level noise addition.
@@ -141,8 +143,29 @@ class DPFedAvgLocalClient(FedAvgClient):
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
+        self._last_noise_post_processing()
 
-        batch_size = len(x)
+    @torch.no_grad()
+    def _step_noise_post_processing(self):
+        """Post-processing for step_noise variant: calculate DP-processed parameter differences."""
+        self.dp_processed_diff = {}
+
+        for name, param in self.model.named_parameters():
+            if name in self.regular_model_params:
+                param_diff = param.data - self.regular_model_params[name].to(param.device)
+                clean_name = self._get_clean_param_name(name)
+                self.dp_processed_diff[clean_name] = param_diff.clone().cpu()
+
+    @torch.no_grad()
+    def _last_noise_post_processing(self):
+        """Post-processing for last_noise variant: integrated parameter difference calculation and noise addition."""
+        # Get the batch size from last training iteration
+        try:
+            x, y = self.get_data_batch()
+            batch_size = len(x)
+        except:
+            batch_size = self.args.common.batch_size
+
         # σ_DP = C * K * η_l * σ_g / b
         sigma_dp = self.clip_norm * self.local_epoch * self.args.optimizer.lr * self.sigma / batch_size
         self.sigma_dp = sigma_dp
@@ -257,6 +280,7 @@ class DPFedAvgLocalClient(FedAvgClient):
         client_package = dict(
             weight=len(self.trainset),
             eval_results=self.eval_results,
+            model_params_diff=self.dp_processed_diff,
             personal_model_params={
                 key: model_params[key].clone().cpu()
                 for key in self.personal_params_name
@@ -269,17 +293,8 @@ class DPFedAvgLocalClient(FedAvgClient):
             sigma_dp=self.sigma_dp
         )
 
-        self.package_for_algorithm_variant(client_package)
-
         return client_package
     
-    def package_for_algorithm_variant(self, client_package: dict):
-        if self.algorithm_variant == 1:  # last_noise
-            # Use precomputed noisy differences
-            client_package["model_params_diff"] = self.dp_processed_diff
-        else:  # step_noise
-            # Compute differences with parameter name cleaning
-            client_package["model_params_diff"] = self._compute_clean_diff()
     
     def get_data_batch(self):
         # Initialize iterator if not already done
@@ -298,19 +313,3 @@ class DPFedAvgLocalClient(FedAvgClient):
     def _get_clean_param_name(self, name: str) -> str:
         """Remove _module. prefix from parameter names for compatibility."""
         return name.replace("_module.", "") if name.startswith("_module.") else name
-
-    def _compute_clean_diff(self):
-        """Compute model parameter differences with clean parameter names."""
-        model_params = self.model.state_dict()
-        clean_diff = {}
-
-        for key in self.regular_params_name:
-
-            if key in self.regular_model_params:
-                param_old = self.regular_model_params[key]
-                param_new = model_params[key]
-
-                clean_key = self._get_clean_param_name(key)
-                clean_diff[clean_key] = (param_new - param_old)
-
-        return clean_diff

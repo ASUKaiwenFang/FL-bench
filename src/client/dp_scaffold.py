@@ -126,11 +126,11 @@ class DPScaffoldClient(DPFedAvgLocalClient):
                 self.lr_scheduler.step()
 
         # Add noise to parameter differences and update control variates simultaneously
-        self._last_noise_processing_with_integrated_control_variates()
+        self._last_noise_post_processing_with_integrated_control_variates()
 
 
     @torch.no_grad()
-    def _last_noise_processing_with_integrated_control_variates(self):
+    def _last_noise_post_processing_with_integrated_control_variates(self):
         """Integrated processing for last_noise variant: DP noise addition and control variate updates.
 
         This method combines:
@@ -303,22 +303,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
     def package(self):
         """Package client data including DP parameters and SCAFFOLD control variates."""
-        model_params = self.model.state_dict()
-        client_package = dict(
-            weight=len(self.trainset),
-            eval_results=self.eval_results,
-            model_params_diff=self.dp_processed_diff,
-            personal_model_params={
-                key: model_params[key].clone().cpu()
-                for key in self.personal_params_name
-            },
-            optimizer_state=deepcopy(self.optimizer.state_dict()),
-            lr_scheduler_state=(
-                {} if self.lr_scheduler is None
-                else deepcopy(self.lr_scheduler.state_dict())
-            ),
-            sigma_dp=self.sigma_dp
-        )
+        client_package = super().package()
 
         client_package["c_delta"] = self.c_delta
 

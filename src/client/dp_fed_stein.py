@@ -101,6 +101,8 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
+        self._step_noise_post_processing()
+
     def _fit_variant_3_step_noise_final_jse(self):
         """Algorithm Variant 3: Gradient-level noise + Final global JSE on parameter differences.
 
@@ -118,27 +120,13 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         # Execute standard step-wise DP training (JSE-compatible version)
         self._step_noise_training()
 
-        # Initialize dp_processed_diff for parameter difference storage
-        self.dp_processed_diff = {}
-
-        for name, param in self.model.named_parameters():
-            if name in self.regular_model_params:
-                param_diff = param.data - self.regular_model_params[name].to(param.device)
-                clean_name = self._get_clean_param_name(name)
-                self.dp_processed_diff[clean_name] = param_diff.clone().cpu()
-                
-        # Apply final JSE to aggregated parameter differences
+        self._step_noise_post_processing()
+        
         JSEProcessor.apply_global_jse_to_parameter_diff(
             self.dp_processed_diff, self.sigma_dp
         )
 
 
-    def package_for_algorithm_variant(self, client_package: dict):
 
-        # Algorithm-specific data packaging
-        if self.algorithm_variant == 2:  # step_noise_step_jse
-            client_package["model_params_diff"] = self._compute_clean_diff()
-        else:  # last_noise_server_jse, step_noise_final_jse
-            client_package["model_params_diff"] = self.dp_processed_diff
-            
+
 
