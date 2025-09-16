@@ -87,37 +87,23 @@ class DPScaffoldServer(DPFedAvgLocalServer):
     def aggregate_client_updates(self, client_packages: OrderedDict[int, Dict[str, Any]]):
         """Aggregate client updates with DP protection and SCAFFOLD control variates."""
 
-        # Aggregate parameter updates using DP-FedAvg Local method with weights
-        client_weights = [package["weight"] for package in client_packages.values()]
+        # Pre-extract frequently accessed data
+        client_packages_values = list(client_packages.values())
+        client_weights = [package["weight"] for package in client_packages_values]
         weights = torch.tensor(client_weights) / sum(client_weights)
+        model_params_diffs = [package["model_params_diff"] for package in client_packages_values]
+        c_deltas = [package["c_delta"] for package in client_packages_values]
 
-        # Aggregate noisy parameter differences
+        # Merged loop for parameter aggregation and control variate updates
         for name, global_param in self.public_model_params.items():
-            diffs = torch.stack(
-                [
-                    package["model_params_diff"][name]
-                    for package in client_packages.values()
-                ],
-                dim=-1,
-            )
+            # Parameter aggregation using DP-FedAvg Local method with weights
+            diffs = torch.stack([diff[name] for diff in model_params_diffs], dim=-1)
             aggregated = torch.sum(diffs * weights, dim=-1)
             self.public_model_params[name].data += self._get_global_lr() * aggregated
 
-        # Update SCAFFOLD global control variates
-        c_delta_list = [package["c_delta"] for package in client_packages.values()]
-
-        # Update global control variates using SCAFFOLD aggregation (unweighted)
-        for name in self.c_global.keys():
-            # Collect c_delta values for this parameter
-            c_delta_values = [c_delta[name] for c_delta in c_delta_list if name in c_delta]
-
-            # Skip if no values found (empty list would cause stack error)
-            if len(c_delta_values) == 0:
-                continue
-
-            c_deltas = torch.stack(c_delta_values, dim=-1)
-            if c_deltas.numel() > 0:
-                self.c_global[name].data += c_deltas.sum(dim=-1) / self.client_num
+            # SCAFFOLD control variate update (unweighted)
+            c_delta_tensor = torch.stack([c_delta[name] for c_delta in c_deltas], dim=-1)
+            self.c_global[name].data += c_delta_tensor.sum(dim=-1) / self.client_num
 
         # Load updated parameters into model
         self.model.load_state_dict(self.public_model_params, strict=False)
