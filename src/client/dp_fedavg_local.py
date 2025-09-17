@@ -56,6 +56,11 @@ class DPFedAvgLocalClient(FedAvgClient):
 
         # Wrap model with GradSampleModule for per-sample gradient computation
         if not isinstance(self.model, GradSampleModule):
+            # Fix model compatibility with Opacus before wrapping
+            from opacus.validators import ModuleValidator
+            if not ModuleValidator.is_valid(self.model):
+                self.model = ModuleValidator.fix(self.model)
+
             original_device = self.model.device
             self.model = GradSampleModule(self.model)
             # Preserve device attribute for compatibility
