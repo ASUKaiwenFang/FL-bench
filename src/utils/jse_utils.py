@@ -171,8 +171,8 @@ class JSEProcessor:
         shrinkage_numerator = (total_elements - 2) * noise_variance
         shrinkage_factor = shrinkage_numerator / total_norm_sq
 
-        # Apply bounds to shrinkage factor
-        shrinkage_factor = torch.clamp(shrinkage_factor, 0.0, JSEProcessor.DEFAULT_MAX_SHRINKAGE)
+        # # Apply bounds to shrinkage factor
+        # shrinkage_factor = torch.clamp(shrinkage_factor, 0.0, JSEProcessor.DEFAULT_MAX_SHRINKAGE)
 
         # Step 3: Apply shrinkage to each gradient directly in-place
         shrinkage_multiplier = 1.0 - shrinkage_factor
@@ -254,8 +254,8 @@ class JSEProcessor:
         shrinkage_numerator = (total_elements - 2) * k_factor * noise_variance
         shrinkage_factor = shrinkage_numerator / total_norm_sq
 
-        # Apply bounds to shrinkage factor
-        shrinkage_factor = torch.clamp(shrinkage_factor, 0.0, JSEProcessor.DEFAULT_MAX_SHRINKAGE)
+        # # Apply bounds to shrinkage factor
+        # shrinkage_factor = torch.clamp(shrinkage_factor, 0.0, JSEProcessor.DEFAULT_MAX_SHRINKAGE)
 
         # Step 3: Apply shrinkage to each parameter individually in-place
         shrinkage_multiplier = 1.0 - shrinkage_factor

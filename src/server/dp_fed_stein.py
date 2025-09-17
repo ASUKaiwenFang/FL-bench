@@ -97,7 +97,7 @@ class DPFedSteinServer(DPFedAvgLocalServer):
 
         # Step 3: Apply global JSE to the aggregated differences
         # Extract noise variance from first client package (should be same for all)
-        noise_variance = list(client_packages.values())[0]["sigma_dp"]
+        noise_variance = list(client_packages.values())[0]["sigma_dp"]**2
         k_factor = 1/int(self.client_num * self.args.common.join_ratio)
         global_lr = self.args.dp_fed_stein.global_lr
 

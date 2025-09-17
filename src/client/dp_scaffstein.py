@@ -2,7 +2,7 @@ from typing import Any
 import torch
 from src.client.dp_scaffold import DPScaffoldClient
 from src.utils.jse_utils import JSEProcessor
-
+from opacus.optimizers.optimizer import _generate_noise
 
 class DPScaffSteinClient(DPScaffoldClient):
     """DP-ScaffStein Client combining Differential Privacy, SCAFFOLD control variates, and JSE.
@@ -53,15 +53,15 @@ class DPScaffSteinClient(DPScaffoldClient):
         - Variant 3: step_noise_final_jse - DP noise at each step, JSE at final step
         """
         if self.algorithm_variant == 1:  # last_noise_server_jse
-            self._last_noise_server_jse_training()
+            self._fit_variant_1_last_noise_server_jse()
         elif self.algorithm_variant == 2:  # step_noise_step_jse
-            self._step_noise_step_jse_training()
+            self._fit_variant_2_step_noise_step_jse()
         elif self.algorithm_variant == 3:  # step_noise_final_jse
-            self._step_noise_final_jse_training()
+            self._fit_variant_3_step_noise_final_jse()
         else:
             raise ValueError(f"Unknown algorithm variant: {self.algorithm_variant}")
 
-    def _last_noise_server_jse_training(self):
+    def _fit_variant_1__last_noise_server_jse(self):
         """Algorithm Variant 3: Last noise with server-side JSE.
 
         Reuses parent's _last_noise_training but removes client-side JSE
@@ -71,7 +71,7 @@ class DPScaffSteinClient(DPScaffoldClient):
         # Server will apply JSE to aggregated parameter differences
         self._last_noise_training()
 
-    def _step_noise_step_jse_training(self):
+    def _fit_variant_2_step_noise_step_jse(self):
         """Algorithm Variant 4: Step-wise DP training with per-step JSE.
 
         Extends parent's _step_noise_training to add JSE at each step.
@@ -92,7 +92,19 @@ class DPScaffSteinClient(DPScaffoldClient):
             loss.backward()
 
             # Apply DP clipping, noise, and JSE with SCAFFOLD control variate correction
-            self._clip_add_noise_and_jse_with_scaffold()
+            self._clip_and_add_noise_opacus()
+            JSEProcessor.apply_global_jse_to_gradients(
+                list(self.model.parameters()), self.sigma_dp**2
+            )
+            for name, param in self.model.named_parameters():
+                clean_name = self._get_clean_param_name(name)
+                control_key = name if name in self.c_global else clean_name
+
+                if control_key in self.c_global and control_key in self.c_local:
+                    c_global = self.c_global[control_key]
+                    c_local = self.c_local[control_key]
+                    param.grad += (c_global - c_local).to(self.device)
+                    
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
@@ -101,7 +113,7 @@ class DPScaffSteinClient(DPScaffoldClient):
         # Use parent's post-processing for SCAFFOLD control variates
         self._step_noise_post_processing_with_integrated_control_variates()
 
-    def _step_noise_final_jse_training(self):
+    def _fit_variant_3_step_noise_final_jse(self):
         """Algorithm Variant 5: Step-wise DP with final JSE.
 
         Uses parent's step_noise training, then applies JSE to final parameter differences.
@@ -123,70 +135,18 @@ class DPScaffSteinClient(DPScaffoldClient):
 
             # Use parent's DP processing without JSE
             self._clip_and_add_noise_with_scaffold()
+                    
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
         # Apply final JSE to parameter differences before SCAFFOLD post-processing
-        self._step_noise_final_jse_post_processing()
+        self._step_noise_final_jse_post_processing_with_integrated_control_variates()
 
-    def _clip_add_noise_and_jse_with_scaffold(self):
-        """Extended gradient processing with JSE integration.
-
-        Extends parent's clipping and noise addition to include JSE shrinkage.
-        Used by algorithm variant 4 (step_noise_step_jse).
-        """
-        # Compute per-sample norms
-        per_sample_norms = self._compute_per_sample_norms_opacus()
-
-        if len(per_sample_norms) == 0:
-            return
-
-        # Compute clipping factors using Opacus formula
-        per_sample_clip_factor = (
-            self.clip_norm / (per_sample_norms + 1e-6)
-        ).clamp(max=1.0)
-
-        # Calculate DP noise standard deviation: σ_DP = C * σ_g / b
-        batch_size = per_sample_norms.size(0)
-        sigma_dp = self.clip_norm * self.sigma / batch_size
-        self.sigma_dp = sigma_dp
-
-        # Process each parameter with integrated clipping, noise, JSE, and control variate correction
-        for name, param in self.model.named_parameters():
-            if hasattr(param, 'grad_sample') and param.grad_sample is not None:
-                # Step 1: Apply DP clipping
-                clipped_grad = torch.einsum("i,i...", per_sample_clip_factor, param.grad_sample)
-
-                # Step 2: Add Gaussian noise
-                from opacus.optimizers.optimizer import _generate_noise
-                noisy_grad = clipped_grad + _generate_noise(
-                    std=sigma_dp,
-                    reference=clipped_grad,
-                    generator=None,
-                    secure_mode=False
-                )
-
-                # Step 3: Apply JSE shrinkage
-                jse_grad = JSEProcessor.apply_jse_shrinkage(
-                    noisy_grad, sigma_dp ** 2
-                )
-
-                # Step 4: Apply SCAFFOLD control variate correction
-                clean_name = self._get_clean_param_name(name)
-                control_key = name if name in self.c_global else clean_name
-
-                if control_key in self.c_global and control_key in self.c_local:
-                    c_global = self.c_global[control_key]
-                    c_local = self.c_local[control_key]
-                    jse_grad += (c_global - c_local).to(self.device)
-
-                # Set the final gradient
-                param.grad = jse_grad
 
     @torch.no_grad()
-    def _step_noise_final_jse_post_processing(self):
+    def _step_noise_final_jse_post_processing_with_integrated_control_variates(self):
         """Post-processing for step_noise_final_jse variant.
 
         Applies JSE to final parameter differences, then updates SCAFFOLD control variates.
@@ -194,7 +154,6 @@ class DPScaffSteinClient(DPScaffoldClient):
         # Initialize storage
         self.dp_processed_diff = {}
         self.c_delta = self.OrderedDict() if hasattr(self, 'OrderedDict') else {}
-        from collections import OrderedDict
         self.c_delta = OrderedDict()
         c_plus = OrderedDict()
 

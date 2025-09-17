@@ -94,7 +94,7 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             loss.backward()
             self._clip_and_add_noise_opacus()
             JSEProcessor.apply_global_jse_to_gradients(
-                list(self.model.parameters()), self.sigma_dp
+                list(self.model.parameters()), self.sigma_dp**2
             )
             self.optimizer.step()
 
@@ -123,7 +123,7 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         self._step_noise_post_processing()
         
         JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.dp_processed_diff, self.sigma_dp
+            self.dp_processed_diff, self.sigma_dp**2
         )
 
 

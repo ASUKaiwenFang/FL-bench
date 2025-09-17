@@ -57,14 +57,14 @@ class DPScaffSteinServer(SCAFFOLDServer):
             return
 
         # Extract sigma_dp from first client package (should be consistent across clients)
-        sigma_dp = client_packages[0].get('sigma_dp', 0.0)
+        sigma_dp = client_packages[0].get('sigma_dp', 0.0)**2
         if sigma_dp <= 0:
             return  # No JSE processing if no DP noise
 
         # Apply global JSE to the aggregated parameter differences
         # self.avg_params contains the aggregated parameter differences
         JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.avg_params, sigma_dp ** 2, k_factor=1  # k_factor=1 for server-side JSE
+            self.avg_params, sigma_dp, k_factor=1  # k_factor=1 for server-side JSE
         )
 
     def get_hyperparams(self) -> Dict[str, Any]:
