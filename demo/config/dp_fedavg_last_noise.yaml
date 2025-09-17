@@ -28,14 +28,14 @@ common:
   seed: 42
   join_ratio: 0.1
   global_epoch: 100
-  local_epoch: 5
+  local_epoch: 10
   batch_size: 32
 
 # DP-FedAvg specific parameters - Last Noise Variant
 dp_fedavg_local:
   algorithm_variant: "last_noise"  # Parameter-level noise addition
-  clip_norm: 1.0                   # Gradient clipping threshold
-  sigma: 0.001                       # Noise standard deviation parameter
+  clip_norm: 10000.0                   # Gradient clipping threshold
+  sigma: 5                       # Noise standard deviation parameter
 
 # Optimizer settings
 optimizer:

@@ -28,14 +28,14 @@ common:
   seed: 42
   join_ratio: 0.1
   global_epoch: 100
-  local_epoch: 5
+  local_epoch: 10
   batch_size: 32
 
 # DP-SCAFFOLD specific parameters - Last Noise Variant
 dp_scaffold:
   algorithm_variant: "last_noise"  # Parameter-level noise addition
   clip_norm: 1.0                   # Gradient clipping threshold
-  sigma: 0.001                     # Noise standard deviation parameter
+  sigma: 0.1                    # Noise standard deviation parameter
   global_lr: 1.0                   # SCAFFOLD global learning rate
 
 # Optimizer settings

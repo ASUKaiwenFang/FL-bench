@@ -173,6 +173,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
                 control_key = name if name in self.c_global else clean_name
 
                 if control_key in self.c_global and control_key in self.c_local:
+
                     c_global = self.c_global[control_key]
                     c_local = self.c_local[control_key]
 
@@ -248,9 +249,11 @@ class DPScaffoldClient(DPFedAvgLocalClient):
                 clipped_grad = torch.einsum("i,i...", per_sample_clip_factor, param.grad_sample)
 
                 # Apply SCAFFOLD control variate correction
-                if name in self.c_global and name in self.c_local:
-                    c_global = self.c_global[name]
-                    c_local = self.c_local[name]
+                clean_name = self._get_clean_param_name(name)
+                control_key = name if name in self.c_global else clean_name
+                if control_key in self.c_global and control_key in self.c_local:
+                    c_global = self.c_global[control_key]
+                    c_local = self.c_local[control_key]
                     clipped_grad += (c_global - c_local).to(self.device)
 
                 # Set the final gradient
@@ -293,9 +296,11 @@ class DPScaffoldClient(DPFedAvgLocalClient):
                 )
 
                 # Apply SCAFFOLD control variate correction
-                if name in self.c_global and name in self.c_local:
-                    c_global = self.c_global[name]
-                    c_local = self.c_local[name]
+                clean_name = self._get_clean_param_name(name)
+                control_key = name if name in self.c_global else clean_name
+                if control_key in self.c_global and control_key in self.c_local:
+                    c_global = self.c_global[control_key]
+                    c_local = self.c_local[control_key]
                     noisy_grad += (c_global - c_local).to(self.device)
 
                 # Set the final gradient
