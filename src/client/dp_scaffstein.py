@@ -190,3 +190,13 @@ class DPScaffSteinClient(DPScaffoldClient):
 
         # Update local control variates
         self.c_local = c_plus
+
+    def package(self):
+        """Package client data including DP parameters, SCAFFOLD control variates, and JSE information."""
+        client_package = super().package()
+
+        # Add sigma_dp for server-side JSE processing (variant 1)
+        if hasattr(self, 'sigma_dp'):
+            client_package["sigma_dp"] = self.sigma_dp
+
+        return client_package
