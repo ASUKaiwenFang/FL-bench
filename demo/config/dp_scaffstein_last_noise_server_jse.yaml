@@ -1,0 +1,45 @@
+# DP-ScaffStein Last Noise Server JSE Variant Configuration
+# This configuration uses parameter-level noise addition with server-side JSE
+
+defaults:
+  - defaults
+  - _self_
+
+# Override Hydra output directory to use 'out' instead of 'outputs'
+hydra:
+  run:
+    dir: ../../out/${method}/${dataset.name}/${now:%Y-%m-%d-%H-%M-%S}
+
+# Override method to use DP-ScaffStein
+method: dp_scaffstein
+
+# Dataset settings
+dataset:
+  name: mnist
+  client_num: 100
+  alpha: 0.1
+
+# Model settings
+model:
+  name: 2nn
+
+# Training settings
+common:
+  seed: 42
+  join_ratio: 0.1
+  global_epoch: 100
+  local_epoch: 5
+  batch_size: 32
+
+# DP-ScaffStein specific parameters - Last Noise Server JSE Variant
+dp_scaffstein:
+  algorithm_variant: "last_noise_server_jse"  # Parameter-level noise + server JSE
+  clip_norm: 1.0                              # Gradient clipping threshold
+  sigma: 0.001                                # Noise standard deviation parameter
+  global_lr: 1.0                              # SCAFFOLD global learning rate
+
+# Optimizer settings
+optimizer:
+  name: sgd
+  lr: 0.01
+  momentum: 0.9

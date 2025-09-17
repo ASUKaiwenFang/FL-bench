@@ -1,0 +1,45 @@
+# DP-ScaffStein Step Noise Step JSE Variant Configuration
+# This configuration uses gradient-level noise addition with per-step JSE application
+
+defaults:
+  - defaults
+  - _self_
+
+# Override Hydra output directory to use 'out' instead of 'outputs'
+hydra:
+  run:
+    dir: ../../out/${method}/${dataset.name}/${now:%Y-%m-%d-%H-%M-%S}
+
+# Override method to use DP-ScaffStein
+method: dp_scaffstein
+
+# Dataset settings
+dataset:
+  name: mnist
+  client_num: 100
+  alpha: 0.1
+
+# Model settings
+model:
+  name: 2nn
+
+# Training settings
+common:
+  seed: 42
+  join_ratio: 0.01
+  global_epoch: 50
+  local_epoch: 5
+  batch_size: 32
+
+# DP-ScaffStein specific parameters - Step Noise Step JSE Variant
+dp_scaffstein:
+  algorithm_variant: "step_noise_step_jse"  # Gradient-level noise + per-step JSE
+  clip_norm: 1.0                            # Gradient clipping threshold
+  sigma: 0.1                                # Noise standard deviation parameter
+  global_lr: 1.0                            # SCAFFOLD global learning rate
+
+# Optimizer settings
+optimizer:
+  name: sgd
+  lr: 0.1
+  momentum: 0.9
