@@ -123,7 +123,7 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         self._step_noise_post_processing()
         
         JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.dp_processed_diff, self.sigma_dp**2
+            self.model_params_diff, self.sigma_dp**2
         )
 
 

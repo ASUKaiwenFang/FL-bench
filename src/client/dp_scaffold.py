@@ -33,7 +33,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
         self.clip_norm = self.args.dp_scaffold.clip_norm
         self.sigma = self.args.dp_scaffold.sigma
         self.sigma_dp = None
-        self.dp_processed_diff = None
+        self.model_params_diff = None
 
         # Support string or numeric configuration for algorithm variant
         ALGORITHM_VARIANTS = {
@@ -143,7 +143,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
         self.sigma_dp = sigma_dp
 
         # Initialize storage
-        self.dp_processed_diff = {}
+        self.model_params_diff = {}
         self.c_delta = OrderedDict()
         c_plus = OrderedDict()
 
@@ -165,7 +165,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
                 )
                 noisy_diff = param_diff + noise
                 clean_name = self._get_clean_param_name(name)
-                self.dp_processed_diff[clean_name] = noisy_diff.clone().cpu()
+                self.model_params_diff[clean_name] = noisy_diff.clone().cpu()
 
                 # SCAFFOLD control variate processing: use clean parameter difference
                 # Try both original name and clean name for compatibility
@@ -195,7 +195,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
         All in a single loop for optimal performance.
         """
         # Initialize storage
-        self.dp_processed_diff = {}
+        self.model_params_diff = {}
         self.c_delta = OrderedDict()
         c_plus = OrderedDict()
 
@@ -209,7 +209,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
                 # DP processing: store parameter difference (already noisy from step_noise training)
                 clean_name = self._get_clean_param_name(name)
-                self.dp_processed_diff[clean_name] = param_diff.clone().cpu()
+                self.model_params_diff[clean_name] = param_diff.clone().cpu()
 
                 # SCAFFOLD control variate processing: use parameter difference
                 # Try both original name and clean name for compatibility

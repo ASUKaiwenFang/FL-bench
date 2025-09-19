@@ -152,7 +152,7 @@ class DPScaffSteinClient(DPScaffoldClient):
         Applies JSE to final parameter differences, then updates SCAFFOLD control variates.
         """
         # Initialize storage
-        self.dp_processed_diff = {}
+        self.model_params_diff = {}
         self.c_delta = self.OrderedDict() if hasattr(self, 'OrderedDict') else {}
         self.c_delta = OrderedDict()
         c_plus = OrderedDict()
@@ -164,11 +164,11 @@ class DPScaffSteinClient(DPScaffoldClient):
             if name in self.regular_model_params:
                 param_diff = param.data - self.regular_model_params[name].to(param.device)
                 clean_name = self._get_clean_param_name(name)
-                self.dp_processed_diff[clean_name] = param_diff.clone().cpu()
+                self.model_params_diff[clean_name] = param_diff.clone().cpu()
 
         # Apply global JSE to parameter differences with k_factor for accumulated noise
         JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.dp_processed_diff, self.sigma_dp ** 2, k_factor=self.local_epoch
+            self.model_params_diff, self.sigma_dp ** 2, k_factor=self.local_epoch
         )
 
         # Then, update SCAFFOLD control variates using original parameter differences
