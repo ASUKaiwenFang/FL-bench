@@ -63,7 +63,7 @@ class DPFedAvgLocalClient(FedAvgClient):
     def set_parameters(self, package: dict[str, Any]):
         super().set_parameters(package)
         self.iter_trainloader = iter(self.trainloader)
-        self.model_params_diff = None
+        self.model_params_diff = {}
 
         # Cache model parameters dictionary for efficient access
         self._cached_model_params = {name: param for name, param in self.model.named_parameters()}
@@ -99,6 +99,9 @@ class DPFedAvgLocalClient(FedAvgClient):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
+            # logits = self.model(x)
+            # loss = self.criterion(logits, y)
+            # loss.backward()
             self._compute_clipped_gradients(x, y, add_noise=True)
             self.optimizer.step()
 
@@ -122,6 +125,9 @@ class DPFedAvgLocalClient(FedAvgClient):
             
             x, y = self.get_data_batch()
             self.optimizer.zero_grad()
+            # logits = self.model(x)
+            # loss = self.criterion(logits, y)
+            # loss.backward()
             self._compute_clipped_gradients(x, y, add_noise=False)
             self.optimizer.step()
 
@@ -134,8 +140,6 @@ class DPFedAvgLocalClient(FedAvgClient):
     @torch.no_grad()
     def _step_noise_post_processing(self):
         """Post-processing for step_noise variant: calculate DP-processed parameter differences."""
-        self.model_params_diff = {}
-
         for name, param in self.model.named_parameters():
             if name in self.regular_model_params:
                 param_diff = param.data - self.regular_model_params[name].to(param.device)
@@ -149,7 +153,6 @@ class DPFedAvgLocalClient(FedAvgClient):
         self.sigma_dp = self._cached_step_sigma_dp * self.local_epoch * self.args.optimizer.lr 
 
         # Calculate noisy parameter differences and store them
-        self.model_params_diff = {}
 
         for name, param in self.model.named_parameters():
             if name in self.regular_model_params:
