@@ -209,8 +209,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
             c_local = self.c_local[name]
 
             # Use param_diff for control variate calculation (clean version without noise)
-            param_diff_cpu = param_diff.cpu()
-            c_plus[name] = c_local - c_global - coef * param_diff_cpu
+            c_plus[name] = c_local - c_global - coef * self.model_params_diff[name]
             self.c_delta[name] = c_plus[name] - c_local
 
         # Update local control variates

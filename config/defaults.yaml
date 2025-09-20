@@ -3,7 +3,8 @@
 # the defaults can be found in src/utils/constants.py
 
 # The method name must be identical to the file name in src/server/<method>.py
-method: fedavg
+# method: scaffold
+method: dp_scaffold_new
 
 dataset:
   # [mnist, cifar10, cifar100, emnist, fmnist, femnist, medmnist,
