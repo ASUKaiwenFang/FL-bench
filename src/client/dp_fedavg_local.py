@@ -249,15 +249,19 @@ class DPFedAvgLocalClient(FedAvgClient):
 
         # Try advanced batch processing for better performance
         try:
-            return self._advanced_batch_process(per_sample_grads, per_sample_clip_factor, sigma_dp, device)
+            return self._concatenated_batch_process(per_sample_grads, per_sample_clip_factor, sigma_dp, device)
         except (RuntimeError, torch.OutOfMemoryError) as e:
             # Fallback to per-parameter processing if memory issues
             import warnings
             warnings.warn(f"Falling back to per-parameter processing due to: {e}")
-            return self._fallback_batch_process(per_sample_grads, per_sample_clip_factor, sigma_dp, device)
+            return self._parameter_wise_batch_process(per_sample_grads, per_sample_clip_factor, sigma_dp, device)
 
-    def _advanced_batch_process(self, per_sample_grads, per_sample_clip_factor, sigma_dp, device):
-        """Advanced batch processing by concatenating all gradients with chunking support."""
+    def _concatenated_batch_process(self, per_sample_grads, per_sample_clip_factor, sigma_dp, device):
+        """Concatenated batch processing for large-scale gradient operations.
+
+        Flattens and concatenates all parameter gradients into a single tensor
+        for efficient batch processing. Best suited for large models on GPU.
+        """
         # Flatten all gradients for true batch processing
         flattened_grads = []
         param_shapes = []
@@ -369,8 +373,12 @@ class DPFedAvgLocalClient(FedAvgClient):
 
         return processed_grads
 
-    def _fallback_batch_process(self, per_sample_grads, per_sample_clip_factor, sigma_dp, device):
-        """Fallback per-parameter processing for memory-constrained scenarios."""
+    def _parameter_wise_batch_process(self, per_sample_grads, per_sample_clip_factor, sigma_dp, device):
+        """Parameter-wise batch processing for memory-efficient operations.
+
+        Processes each parameter's gradients independently without tensor
+        concatenation. Most memory-efficient and fastest for small-medium models.
+        """
         processed_grads = {}
 
         for param_name, per_sample_grad in per_sample_grads.items():
@@ -385,29 +393,6 @@ class DPFedAvgLocalClient(FedAvgClient):
             processed_grads[param_name] = noisy_grad
 
         return processed_grads
-
-    def _vectorized_clip_gradients(self, per_sample_grads, per_sample_norms, clip_norm):
-        """Vectorized gradient clipping implementation.
-
-        Args:
-            per_sample_grads: Dictionary of per-sample gradients
-            per_sample_norms: L2 norms of per-sample gradients
-            clip_norm: Clipping threshold
-
-        Returns:
-            tuple: (clipped_grads_dict, clip_factors)
-        """
-        # Compute clipping factors in batch
-        per_sample_clip_factor = (clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
-
-        clipped_grads = {}
-        for param_name, per_sample_grad in per_sample_grads.items():
-            # Apply clipping vectorially
-            clip_shape = [per_sample_clip_factor.size(0)] + [1] * (per_sample_grad.ndim - 1)
-            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
-            clipped_grads[param_name] = clipped_grad
-
-        return clipped_grads, per_sample_clip_factor
 
     @torch.no_grad()
     def _step_noise_post_processing(self):
