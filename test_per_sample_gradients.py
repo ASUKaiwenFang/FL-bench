@@ -26,7 +26,7 @@ FLBENCH_ROOT = Path(__file__).parent.absolute()
 if FLBENCH_ROOT not in sys.path:
     sys.path.append(FLBENCH_ROOT.as_posix())
 
-from src.client.dp_fedavg_local import _compute_per_sample_grads, _compute_per_sample_norms
+from src.utils.dp_mechanisms import compute_per_sample_grads, compute_per_sample_norms
 
 # Try to import opacus for comparison tests
 try:
@@ -245,7 +245,7 @@ def test_opacus_comparison(results: TestResults):
         criterion = nn.CrossEntropyLoss()
 
         # Compute gradients using our implementation
-        our_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+        our_grads = compute_per_sample_grads(model, inputs, targets, criterion)
 
         # Compute gradients using Opacus
         opacus_grads = compute_opacus_per_sample_grads(model, inputs, targets, criterion)
@@ -339,7 +339,7 @@ def test_opacus_different_models(results: TestResults):
 
         for i, (model, inputs, targets) in enumerate(models_and_data):
             # Compute gradients with both methods
-            our_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+            our_grads = compute_per_sample_grads(model, inputs, targets, criterion)
             opacus_grads = compute_opacus_per_sample_grads(model, inputs, targets, criterion)
 
             # Find maximum difference for this model
@@ -388,7 +388,7 @@ def test_gradient_aggregation_consistency(results: TestResults):
                 batch_grads[name] = param.grad.clone()
 
         # Compute per-sample gradients and average them
-        per_sample_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+        per_sample_grads = compute_per_sample_grads(model, inputs, targets, criterion)
         averaged_grads = {}
         for name, grad_tensor in per_sample_grads.items():
             averaged_grads[name] = grad_tensor.mean(dim=0)
@@ -424,7 +424,7 @@ def test_individual_sample_correctness(results: TestResults):
         criterion = nn.MSELoss()
 
         # Compute per-sample gradients using our function
-        per_sample_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+        per_sample_grads = compute_per_sample_grads(model, inputs, targets, criterion)
 
         # Manually compute each sample's gradient
         max_diff = 0.0
@@ -467,7 +467,7 @@ def test_numerical_stability(results: TestResults):
         targets = torch.randn(1, 1)
         criterion = nn.MSELoss()
 
-        per_sample_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+        per_sample_grads = compute_per_sample_grads(model, inputs, targets, criterion)
 
         # Should have gradients for all parameters
         param_count = sum(1 for _ in model.named_parameters())
@@ -481,13 +481,13 @@ def test_numerical_stability(results: TestResults):
         constant_targets = torch.ones(4, 1)
 
         # This should produce small gradients
-        zero_grads = _compute_per_sample_grads(simple_model, zero_inputs, constant_targets, criterion)
+        zero_grads = compute_per_sample_grads(simple_model, zero_inputs, constant_targets, criterion)
 
         # Test 3: Large values
         large_inputs = torch.randn(3, 2) * 100
         large_targets = torch.randn(3, 1) * 100
 
-        large_grads = _compute_per_sample_grads(model, large_inputs, large_targets, criterion)
+        large_grads = compute_per_sample_grads(model, large_inputs, large_targets, criterion)
 
         # Check for NaN or infinite values
         has_nan = any(torch.isnan(grad).any() for grad in large_grads.values())
@@ -541,7 +541,7 @@ def test_different_model_architectures(results: TestResults):
             model.eval()  # Important for BatchNorm
 
             try:
-                per_sample_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+                per_sample_grads = compute_per_sample_grads(model, inputs, targets, criterion)
 
                 # Basic sanity checks
                 if len(per_sample_grads) == 0:
@@ -583,7 +583,7 @@ def test_different_loss_functions(results: TestResults):
 
         for criterion, targets in loss_configs:
             try:
-                per_sample_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+                per_sample_grads = compute_per_sample_grads(model, inputs, targets, criterion)
 
                 if len(per_sample_grads) == 0:
                     results.add_fail(test_name, f"No gradients for {type(criterion).__name__}")
@@ -614,7 +614,7 @@ def test_memory_usage(results: TestResults):
         tracemalloc.start()
 
         # Compute per-sample gradients
-        per_sample_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+        per_sample_grads = compute_per_sample_grads(model, inputs, targets, criterion)
 
         # Get peak memory usage
         current, peak = tracemalloc.get_traced_memory()
@@ -642,11 +642,11 @@ def test_computation_time(results: TestResults):
         criterion = nn.CrossEntropyLoss()
 
         # Warm up
-        _ = _compute_per_sample_grads(model, inputs, targets, criterion)
+        _ = compute_per_sample_grads(model, inputs, targets, criterion)
 
         # Time the computation
         start_time = time.time()
-        per_sample_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+        per_sample_grads = compute_per_sample_grads(model, inputs, targets, criterion)
         end_time = time.time()
 
         duration = end_time - start_time
@@ -671,10 +671,10 @@ def test_integration_with_dp_pipeline(results: TestResults):
         criterion = nn.CrossEntropyLoss()
 
         # Compute per-sample gradients
-        per_sample_grads = _compute_per_sample_grads(model, inputs, targets, criterion)
+        per_sample_grads = compute_per_sample_grads(model, inputs, targets, criterion)
 
         # Compute per-sample norms
-        per_sample_norms = _compute_per_sample_norms(per_sample_grads)
+        per_sample_norms = compute_per_sample_norms(per_sample_grads)
 
         # Basic checks
         if per_sample_norms.size(0) != inputs.size(0):

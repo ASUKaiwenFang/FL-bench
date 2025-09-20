@@ -58,6 +58,7 @@ class DPFedAvgLocalClient(FedAvgClient):
         self._cached_step_sigma_dp = self.clip_norm * self.sigma / self.args.common.batch_size
         # Cache for model parameters dictionary
         self._cached_model_params = None
+        self._cached_model_buffers = None
 
 
     def set_parameters(self, package: dict[str, Any]):
@@ -67,6 +68,7 @@ class DPFedAvgLocalClient(FedAvgClient):
 
         # Cache model parameters dictionary for efficient access
         self._cached_model_params = {name: param for name, param in self.model.named_parameters()}
+        self._cached_model_buffers = {name: buffer for name, buffer in self.model.named_buffers()}
 
     
     def fit(self):
@@ -178,9 +180,11 @@ class DPFedAvgLocalClient(FedAvgClient):
             add_noise: Whether to add Gaussian noise to gradients
         """
 
-        # Compute per-sample gradients and losses
-        per_sample_grads, per_sample_losses = compute_per_sample_grads(
-            self.model, inputs, targets, self.criterion
+        # Compute per-sample gradients
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
         )
 
         # Compute per-sample gradient norms

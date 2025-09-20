@@ -74,9 +74,7 @@ def compute_per_sample_grads(model, inputs, targets, criterion, cached_params=No
         cached_buffers: Optional pre-computed buffers dict to avoid repeated extraction
 
     Returns:
-        tuple: (per_sample_grads, per_sample_losses) where:
-            - per_sample_grads: dict {param_name: per_sample_grad_tensor} with shape [batch_size, *param_shape]
-            - per_sample_losses: tensor with shape [batch_size] containing per-sample loss values
+        dict: per_sample_grads - dict {param_name: per_sample_grad_tensor} with shape [batch_size, *param_shape]
     """
     def compute_loss_for_sample(params, buffers, sample_input, sample_target):
         predictions = torch.func.functional_call(model, (params, buffers), sample_input.unsqueeze(0))
@@ -90,13 +88,13 @@ def compute_per_sample_grads(model, inputs, targets, criterion, cached_params=No
         params = {name: param for name, param in model.named_parameters()}
         buffers = {name: buffer for name, buffer in model.named_buffers()}
 
-    # Use vmap to vectorize over the batch dimension with grad_and_value for efficiency
-    per_sample_grads, per_sample_losses = torch.vmap(
-        torch.func.grad_and_value(compute_loss_for_sample, argnums=0),
+    # Use vmap to vectorize over the batch dimension with grad for efficiency
+    per_sample_grads = torch.vmap(
+        torch.func.grad(compute_loss_for_sample, argnums=0),
         in_dims=(None, None, 0, 0)
     )(params, buffers, inputs, targets)
 
-    return per_sample_grads, per_sample_losses
+    return per_sample_grads
 
 
 def compute_per_sample_norms(per_sample_grads):
