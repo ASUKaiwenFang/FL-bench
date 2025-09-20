@@ -217,6 +217,8 @@ class FedAvgClient:
                 loss = self.criterion(logit, y)
                 self.optimizer.zero_grad()
                 loss.backward()
+                total_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), float('inf'))
+                print(f"[FedAvg] Total grad norm: {total_grad_norm:.6f}")
                 self.optimizer.step()
 
             if self.lr_scheduler is not None:

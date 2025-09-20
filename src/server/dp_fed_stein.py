@@ -4,7 +4,7 @@ from collections import OrderedDict
 import torch
 from omegaconf import DictConfig
 
-from src.client.dp_fed_stein import DPFedSteinClient
+from src.client.dp_fed_stein import DPFedSteinClient, FedSteinAlgorithmVariant
 from src.server.dp_fedavg_local import DPFedAvgLocalServer
 from src.utils.jse_utils import JSEProcessor
 
@@ -50,9 +50,9 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         # Get algorithm variant for server-side processing
         variant_config = getattr(self.args.dp_fed_stein, 'algorithm_variant', 'step_noise_step_jse')
         if isinstance(variant_config, str):
-            self.algorithm_variant = DPFedSteinClient.ALGORITHM_VARIANTS[variant_config]
+            self.fed_stein_algorithm_variant = getattr(FedSteinAlgorithmVariant, variant_config.upper())
         else:
-            self.algorithm_variant = variant_config
+            self.fed_stein_algorithm_variant = FedSteinAlgorithmVariant(variant_config)
 
 
     def aggregate_client_updates(self, client_packages: OrderedDict[int, Dict[str, Any]]):
@@ -64,7 +64,7 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         """
 
         # For variant 1, we need custom aggregation with post-aggregation JSE
-        if self.algorithm_variant == 1:
+        if self.fed_stein_algorithm_variant == FedSteinAlgorithmVariant.LAST_NOISE_SERVER_JSE:
             self._aggregate_with_post_jse_variant_1(client_packages)
         else:
             # For other variants, use standard aggregation

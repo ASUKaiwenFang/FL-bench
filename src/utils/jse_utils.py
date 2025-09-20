@@ -91,11 +91,15 @@ class JSEProcessor:
         shrinkage_numerator = (d - 2) * k_factor * noise_variance
         shrinkage_factor = shrinkage_numerator / tensor_norm_sq
 
-        # Apply bounds to shrinkage factor
-        shrinkage_factor = torch.clamp(shrinkage_factor, 0.0, JSEProcessor.DEFAULT_MAX_SHRINKAGE)
+        # Print shrinkage factor statistics before clamp
+        print(f"[JSE] apply_jse_shrinkage: shrinkage_factor={shrinkage_factor:.6f}, norm_sq={tensor_norm_sq:.6f}, elements={d}")
 
-        # Apply shrinkage: result = (1 - shrinkage_factor) * tensor
-        return (1.0 - shrinkage_factor) * tensor
+        # Calculate shrinkage multiplier and apply bounds
+        shrinkage_multiplier = 1.0 - shrinkage_factor
+        shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
+
+        # Apply shrinkage: result = shrinkage_multiplier * tensor
+        return shrinkage_multiplier * tensor
 
     @staticmethod
     def apply_layerwise_jse_to_gradients(
@@ -171,11 +175,14 @@ class JSEProcessor:
         shrinkage_numerator = (total_elements - 2) * noise_variance
         shrinkage_factor = shrinkage_numerator / total_norm_sq
 
-        # # Apply bounds to shrinkage factor
-        # shrinkage_factor = torch.clamp(shrinkage_factor, 0.0, JSEProcessor.DEFAULT_MAX_SHRINKAGE)
+        # Print shrinkage factor statistics before clamp
+        print(f"[JSE] apply_global_jse_to_gradients: shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}")
+
+        # Calculate shrinkage multiplier and apply bounds
+        shrinkage_multiplier = 1.0 - shrinkage_factor
+        shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Step 3: Apply shrinkage to each gradient directly in-place
-        shrinkage_multiplier = 1.0 - shrinkage_factor
 
         for param in grad_params:
             param.grad.data *= shrinkage_multiplier
@@ -254,11 +261,14 @@ class JSEProcessor:
         shrinkage_numerator = (total_elements - 2) * k_factor * noise_variance
         shrinkage_factor = shrinkage_numerator / total_norm_sq
 
-        # # Apply bounds to shrinkage factor
-        # shrinkage_factor = torch.clamp(shrinkage_factor, 0.0, JSEProcessor.DEFAULT_MAX_SHRINKAGE)
+        # Print shrinkage factor statistics before clamp
+        print(f"[JSE] apply_global_jse_to_parameter_diff: shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}")
+
+        # Calculate shrinkage multiplier and apply bounds
+        shrinkage_multiplier = 1.0 - shrinkage_factor
+        shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Step 3: Apply shrinkage to each parameter individually in-place
-        shrinkage_multiplier = 1.0 - shrinkage_factor
 
         for key, tensor in param_diff_dict.items():
             if tensor.numel() > 0:

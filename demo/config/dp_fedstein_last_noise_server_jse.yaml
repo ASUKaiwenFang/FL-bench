@@ -13,12 +13,6 @@ hydra:
 # Override method to use DP-FedStein
 method: dp_fed_stein
 
-# Dataset settings
-dataset:
-  name: mnist
-  client_num: 100
-  alpha: 0.1
-
 # Model settings
 model:
   name: 2nn
@@ -37,9 +31,3 @@ dp_fed_stein:
   jse_enabled: true                           # Enable James-Stein estimator
   clip_norm: 1.0                             # Gradient clipping threshold
   sigma: 0.1                                 # Noise standard deviation parameter
-
-# Optimizer settings
-optimizer:
-  name: sgd
-  lr: 0.01
-  momentum: 0.9
