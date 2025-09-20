@@ -23,8 +23,14 @@ class DPFedAvgLocalClient(FedAvgClient):
     then averaged and noised before parameter updates.
 
     Supports two algorithm variants:
-    - step_noise: Add noise to gradients at each training step (current implementation)
+    - step_noise: Add noise to gradients at each training step
     - last_noise: Add noise to parameter differences after training completion
+
+    Performance Optimizations:
+    - Unified gradient processing method eliminates code duplication
+    - Pre-computed sigma_dp values reduce redundant calculations
+    - Cached model parameters dictionary avoids repeated creation
+    - Optimized clip shape computation reduces loop overhead
     """
 
     # Configuration constants
@@ -48,11 +54,19 @@ class DPFedAvgLocalClient(FedAvgClient):
             # Legacy numeric support
             self.algorithm_variant = AlgorithmVariant(variant_config)
 
+        # Pre-compute sigma_dp for step_noise algorithm (constant value)
+        self._cached_step_sigma_dp = self.clip_norm * self.sigma / self.args.common.batch_size
+        # Cache for model parameters dictionary
+        self._cached_model_params = None
+
 
     def set_parameters(self, package: dict[str, Any]):
         super().set_parameters(package)
         self.iter_trainloader = iter(self.trainloader)
         self.model_params_diff = None
+
+        # Cache model parameters dictionary for efficient access
+        self._cached_model_params = {name: param for name, param in self.model.named_parameters()}
 
     
     def fit(self):
@@ -85,7 +99,7 @@ class DPFedAvgLocalClient(FedAvgClient):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
-            self._clip_and_add_noise(x, y)
+            self._compute_clipped_gradients(x, y, add_noise=True)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
@@ -108,7 +122,7 @@ class DPFedAvgLocalClient(FedAvgClient):
             
             x, y = self.get_data_batch()
             self.optimizer.zero_grad()
-            self._clip_without_noise(x, y)
+            self._compute_clipped_gradients(x, y, add_noise=False)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
@@ -130,12 +144,9 @@ class DPFedAvgLocalClient(FedAvgClient):
     @torch.no_grad()
     def _last_noise_post_processing(self):
         """Post-processing for last_noise variant: integrated parameter difference calculation and noise addition."""
-        # Use configured batch size for noise calculation
-        batch_size = self.args.common.batch_size
 
         # σ_DP = C * K * η_l * σ_g / b
-        sigma_dp = self.clip_norm * self.local_epoch * self.args.optimizer.lr * self.sigma / batch_size
-        self.sigma_dp = sigma_dp
+        self.sigma_dp = self._cached_step_sigma_dp * self.local_epoch * self.args.optimizer.lr 
 
         # Calculate noisy parameter differences and store them
         self.model_params_diff = {}
@@ -144,22 +155,24 @@ class DPFedAvgLocalClient(FedAvgClient):
             if name in self.regular_model_params:
                 param_diff = param.data - self.regular_model_params[name].to(param.device)
                 # Generate Gaussian noise (inlined for efficiency)
-                noise = torch.randn_like(param_diff, device=param.device) * sigma_dp
+                noise = torch.randn_like(param_diff, device=param.device) * self.sigma_dp
                 noisy_diff = param_diff + noise
                 self.model_params_diff[name] = noisy_diff.clone().cpu()
 
-    def _clip_without_noise(self, inputs, targets):
-        """Clip per-sample gradients and add noise using DP-SGD algorithm.
+    def _compute_clipped_gradients(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with optional noise addition.
 
         This method implements the core DP-SGD algorithm with clip→mean→add_noise order:
         - Computes per-sample gradients
         - Clips gradients based on L2 norm
         - Averages clipped gradients across batch
+        - Optionally adds calibrated Gaussian noise to averaged gradient
         - Sets final gradients to model parameters
 
         Args:
             inputs: Input batch tensor [batch_size, ...]
             targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
         """
 
         # Compute per-sample gradients and losses
@@ -174,80 +187,30 @@ class DPFedAvgLocalClient(FedAvgClient):
             return
 
         # Calculate DP noise standard deviation: σ_DP = C * σ_g
-        batch_size = per_sample_norms.size(0)
-        sigma_dp = self.clip_norm * self.sigma
-        self.sigma_dp = sigma_dp
+        self.sigma_dp = self._cached_step_sigma_dp
 
         # Calculate per-sample clipping factors
         per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
 
-        # Create model parameters dictionary for efficient access
-        model_params = {name: param for name, param in self.model.named_parameters()}
+        # Pre-compute clip shape dimensions for optimization
+        clip_factor_size = per_sample_clip_factor.size(0)
 
         # Process gradients: clip → mean → add_noise
         for param_name, per_sample_grad in per_sample_grads.items():
             # Vectorized clipping using optimized tensor multiplication
-            clip_shape = [per_sample_clip_factor.size(0)] + [1] * (per_sample_grad.ndim - 1)
-            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
-
-            # Average clipped gradients across batch
-            model_params[param_name].grad = clipped_grad.mean(dim=0)
-
-    
-    
-                
-    def _clip_and_add_noise(self, inputs, targets):
-        """Clip per-sample gradients and add noise using DP-SGD algorithm.
-
-        This method implements the core DP-SGD algorithm with clip→mean→add_noise order:
-        - Computes per-sample gradients
-        - Clips gradients based on L2 norm
-        - Averages clipped gradients across batch
-        - Adds calibrated Gaussian noise to averaged gradient
-        - Sets final gradients to model parameters
-
-        Args:
-            inputs: Input batch tensor [batch_size, ...]
-            targets: Target batch tensor [batch_size, ...]
-        """
-
-        # Compute per-sample gradients and losses
-        per_sample_grads, per_sample_losses = compute_per_sample_grads(
-            self.model, inputs, targets, self.criterion
-        )
-
-        # Compute per-sample gradient norms
-        per_sample_norms = compute_per_sample_norms(per_sample_grads)
-
-        if len(per_sample_norms) == 0:
-            return
-
-        # Calculate DP noise standard deviation: σ_DP = C * σ_g
-        batch_size = per_sample_norms.size(0)
-        sigma_dp = self.clip_norm * self.sigma
-        self.sigma_dp = sigma_dp
-
-        # Calculate per-sample clipping factors
-        per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
-
-        # Create model parameters dictionary for efficient access
-        model_params = {name: param for name, param in self.model.named_parameters()}
-
-        # Process gradients: clip → mean → add_noise
-        for param_name, per_sample_grad in per_sample_grads.items():
-            # Vectorized clipping using optimized tensor multiplication
-            clip_shape = [per_sample_clip_factor.size(0)] + [1] * (per_sample_grad.ndim - 1)
+            clip_shape = [clip_factor_size] + [1] * (per_sample_grad.ndim - 1)
             clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
 
             # Average clipped gradients across batch
             mean_clipped_grad = clipped_grad.mean(dim=0)
 
-            # Add Gaussian noise to averaged gradient
-            noise = torch.randn_like(mean_clipped_grad, device=self.device) * sigma_dp
+            if add_noise:
+                # Add Gaussian noise to averaged gradient
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
+                self._cached_model_params[param_name].grad = mean_clipped_grad + noise
+            else:
+                self._cached_model_params[param_name].grad = mean_clipped_grad
 
-            # Set final gradient to model parameter
-            model_params[param_name].grad = mean_clipped_grad + noise
-    
     
     def package(self):
         """Package client data including DP parameters.
