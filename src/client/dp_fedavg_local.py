@@ -36,18 +36,69 @@ class DPFedAvgLocalClient(FedAvgClient):
     # Configuration constants
     numerical_epsilon = 1e-6
 
+    def _get_dp_config_value(self, key: str, default=None):
+        """Dynamic DP configuration value access with fallback strategy.
+
+        Priority order:
+        1. Method-specific config (e.g., dp_scaffold.clip_norm)
+        2. dp_fedavg_local config (backward compatibility)
+        3. Provided default value
+        4. Hardcoded class defaults
+
+        Args:
+            key: Configuration key to access
+            default: Default value if key not found
+
+        Returns:
+            Configuration value
+        """
+        # Get current method name from args
+        method_name = self.args.method
+
+        # Try method-specific config first (e.g., dp_scaffold)
+        if hasattr(self.args, method_name):
+            method_config = getattr(self.args, method_name)
+            if hasattr(method_config, key):
+                return getattr(method_config, key)
+
+        # Fall back to dp_fedavg_local config for backward compatibility
+        if hasattr(self.args, 'dp_fedavg_local'):
+            dp_config = getattr(self.args, 'dp_fedavg_local')
+            if hasattr(dp_config, key):
+                return getattr(dp_config, key)
+
+        # Use provided default
+        if default is not None:
+            return default
+
+        # Hardcoded defaults as last resort
+        defaults = {
+            'clip_norm': 1.0,
+            'sigma': 0.1,
+            'algorithm_variant': 'step_noise'
+        }
+
+        if key in defaults:
+            return defaults[key]
+
+        # If nothing found, raise a helpful error
+        raise AttributeError(
+            f"Configuration key '{key}' not found. "
+            f"Please add '{key}' to your {method_name} or dp_fedavg_local configuration section."
+        )
+
     def __init__(self, **commons):
         super().__init__(**commons)
         self.iter_trainloader = None
 
-        # Initialize DP parameters
-        self.clip_norm = self.args.dp_fedavg_local.clip_norm
-        self.sigma = self.args.dp_fedavg_local.sigma
+        # Initialize DP parameters using dynamic config access
+        self.clip_norm = self._get_dp_config_value('clip_norm', 1.0)
+        self.sigma = self._get_dp_config_value('sigma', 0.1)
         self.sigma_dp = None
         self.model_params_diff = None
 
         # Support string or numeric configuration with enum
-        variant_config = getattr(self.args.dp_fedavg_local, 'algorithm_variant', 'step_noise')
+        variant_config = self._get_dp_config_value('algorithm_variant', 'step_noise')
         if isinstance(variant_config, str):
             self.algorithm_variant = getattr(AlgorithmVariant, variant_config.upper())
         else:
