@@ -13,11 +13,6 @@ hydra:
 # Override method to use DP-ScaffStein
 method: dp_scaffstein
 
-# Dataset settings
-dataset:
-  name: mnist
-  client_num: 100
-  alpha: 0.1
 
 # Model settings
 model:
@@ -26,8 +21,8 @@ model:
 # Training settings
 common:
   seed: 42
-  join_ratio: 0.01
-  global_epoch: 50
+  join_ratio: 0.1
+  global_epoch: 100
   local_epoch: 5
   batch_size: 32
 
@@ -41,5 +36,4 @@ dp_scaffstein:
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.1
-  momentum: 0.9
+  lr: 0.5

@@ -1,12 +1,13 @@
 from typing import Dict, List, Any
 from collections import OrderedDict
-from argparse import Namespace
+from argparse import ArgumentParser, Namespace
 import torch
-from src.server.scaffold import SCAFFOLDServer
+from src.server.dp_scaffold import DPScaffoldServer
+from src.client.dp_scaffstein import DPScaffSteinClient
 from src.utils.jse_utils import JSEProcessor
 
 
-class DPScaffSteinServer(SCAFFOLDServer):
+class DPScaffSteinServer(DPScaffoldServer):
     """DP-ScaffStein Server combining Differential Privacy, SCAFFOLD control variates, and JSE.
 
     This server implements DP-ScaffStein algorithms with three variants:
@@ -16,6 +17,27 @@ class DPScaffSteinServer(SCAFFOLDServer):
 
     Only variant 1 requires server-side JSE processing.
     """
+    algorithm_name: str = "DP-SCAFFSTEIN"
+    client_cls = DPScaffSteinClient
+
+    @staticmethod
+    def get_hyperparams(args_list=None) -> Namespace:
+        """Define hyperparameters for DP-ScaffStein."""
+        parser = ArgumentParser()
+
+        # DP parameters (from DP-SCAFFOLD)
+        parser.add_argument("--global_lr", type=float, default=1.0,
+                           help="Global learning rate for parameter aggregation")
+        parser.add_argument("--clip_norm", type=float, default=1.0,
+                           help="Gradient clipping norm")
+        parser.add_argument("--sigma", type=float, default=1.0,
+                           help="Noise standard deviation")
+        parser.add_argument("--algorithm_variant", type=str,
+                           choices=["last_noise_server_jse", "step_noise_step_jse", "step_noise_final_jse"],
+                           default="step_noise_final_jse",
+                           help="Algorithm variant: JSE variants for DP-ScaffStein")
+
+        return parser.parse_args(args_list)
 
     def __init__(self, **commons):
         super().__init__(**commons)

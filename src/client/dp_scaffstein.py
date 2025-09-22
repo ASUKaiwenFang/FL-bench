@@ -1,8 +1,17 @@
 from typing import Any
+from enum import Enum
 import torch
+from collections import OrderedDict
 from src.client.dp_scaffold import DPScaffoldClient
 from src.utils.jse_utils import JSEProcessor
-from opacus.optimizers.optimizer import _generate_noise
+
+
+class ScaffSteinAlgorithmVariant(Enum):
+    """Algorithm variants for DP-ScaffStein implementation."""
+    LAST_NOISE_SERVER_JSE = 1
+    STEP_NOISE_STEP_JSE = 2
+    STEP_NOISE_FINAL_JSE = 3
+
 
 class DPScaffSteinClient(DPScaffoldClient):
     """DP-ScaffStein Client combining Differential Privacy, SCAFFOLD control variates, and JSE.
@@ -17,32 +26,31 @@ class DPScaffSteinClient(DPScaffoldClient):
     """
 
     def __init__(self, **commons):
-        # Initialize with parent class logic first
+        # Temporarily override algorithm_variant config to prevent parent class conflicts
+        original_args = commons['args']
+        temp_variant_config = None
+
+        # Check if we have ScaffStein-specific algorithm variant
+        if hasattr(original_args, 'dp_scaffstein') and hasattr(original_args.dp_scaffstein, 'algorithm_variant'):
+            temp_variant_config = original_args.dp_scaffstein.algorithm_variant
+            # Map ScaffStein variants to parent class compatible variants
+            if temp_variant_config in ['last_noise_server_jse', 'LAST_NOISE_SERVER_JSE']:
+                original_args.dp_scaffstein.algorithm_variant = 'last_noise'
+            elif temp_variant_config in ['step_noise_step_jse', 'STEP_NOISE_STEP_JSE', 'step_noise_final_jse', 'STEP_NOISE_FINAL_JSE']:
+                original_args.dp_scaffstein.algorithm_variant = 'step_noise'
+
         super().__init__(**commons)
 
-        # Handle configuration compatibility between dp_scaffold and dp_scaffstein
-        if hasattr(self.args, 'dp_scaffstein'):
-            # Use dp_scaffstein config if available
-            config = self.args.dp_scaffstein
-            self.clip_norm = config.clip_norm
-            self.sigma = config.sigma
-            variant_config = getattr(config, 'algorithm_variant', 'step_noise_final_jse')
+        # Restore and set ScaffStein-specific algorithm variant
+        if temp_variant_config:
+            original_args.dp_scaffstein.algorithm_variant = temp_variant_config
+            if isinstance(temp_variant_config, str):
+                self.scaffstein_algorithm_variant = getattr(ScaffSteinAlgorithmVariant, temp_variant_config.upper())
+            else:
+                self.scaffstein_algorithm_variant = ScaffSteinAlgorithmVariant(temp_variant_config)
         else:
-            # Fallback to dp_scaffold config (map to nearest JSE equivalent)
-            config = self.args.dp_scaffold
-            variant_config = getattr(config, 'algorithm_variant', 'step_noise_final_jse')
-
-        # DP-ScaffStein specific algorithm variants (JSE variants only)
-        ALGORITHM_VARIANTS = {
-            "last_noise_server_jse": 1,
-            "step_noise_step_jse": 2,
-            "step_noise_final_jse": 3
-        }
-
-        if isinstance(variant_config, str):
-            self.algorithm_variant = ALGORITHM_VARIANTS[variant_config]
-        else:
-            self.algorithm_variant = variant_config
+            # Default variant
+            self.scaffstein_algorithm_variant = ScaffSteinAlgorithmVariant.STEP_NOISE_FINAL_JSE
 
     def fit(self):
         """Train the model with DP-ScaffStein algorithm.
@@ -52,144 +60,87 @@ class DPScaffSteinClient(DPScaffoldClient):
         - Variant 2: step_noise_step_jse - DP noise and JSE at each step
         - Variant 3: step_noise_final_jse - DP noise at each step, JSE at final step
         """
-        if self.algorithm_variant == 1:  # last_noise_server_jse
+        if self.scaffstein_algorithm_variant == ScaffSteinAlgorithmVariant.LAST_NOISE_SERVER_JSE:
             self._fit_variant_1_last_noise_server_jse()
-        elif self.algorithm_variant == 2:  # step_noise_step_jse
+        elif self.scaffstein_algorithm_variant == ScaffSteinAlgorithmVariant.STEP_NOISE_STEP_JSE:
             self._fit_variant_2_step_noise_step_jse()
-        elif self.algorithm_variant == 3:  # step_noise_final_jse
+        elif self.scaffstein_algorithm_variant == ScaffSteinAlgorithmVariant.STEP_NOISE_FINAL_JSE:
             self._fit_variant_3_step_noise_final_jse()
         else:
-            raise ValueError(f"Unknown algorithm variant: {self.algorithm_variant}")
+            raise ValueError(f"Unknown ScaffStein algorithm variant: {self.scaffstein_algorithm_variant}")
 
-    def _fit_variant_1__last_noise_server_jse(self):
-        """Algorithm Variant 3: Last noise with server-side JSE.
+    def _fit_variant_1_last_noise_server_jse(self):
+        """Algorithm Variant 1: Last noise with server-side JSE.
 
         Reuses parent's _last_noise_training but removes client-side JSE
         since JSE will be applied at the server.
         """
-        # Delegate to parent class implementation
-        # Server will apply JSE to aggregated parameter differences
+        # Use parent class last_noise training
         self._last_noise_training()
 
-    def _fit_variant_2_step_noise_step_jse(self):
-        """Algorithm Variant 4: Step-wise DP training with per-step JSE.
+    def _compute_clipped_gradients_with_step_jse(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with step-wise JSE application.
 
-        Extends parent's _step_noise_training to add JSE at each step.
+        This method extends the parent class gradient computation by adding
+        step-wise JSE processing after gradient computation.
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
         """
-        self.model.train()
-        self.dataset.train()
+        # Use parent class gradient computation
+        super()._compute_clipped_gradients(inputs, targets, add_noise)
 
-        for _ in range(self.local_epoch):
-            x, y = self.get_data_batch()
-
-            self.optimizer.zero_grad()
-            for param in self.model.parameters():
-                if hasattr(param, 'grad_sample'):
-                    param.grad_sample = None
-
-            logits = self.model(x)
-            loss = self.criterion(logits, y)
-            loss.backward()
-
-            # Apply DP clipping, noise, and JSE with SCAFFOLD control variate correction
-            self._clip_and_add_noise_opacus()
+        # Apply step-wise JSE to gradients
+        if add_noise:
             JSEProcessor.apply_global_jse_to_gradients(
                 list(self.model.parameters()), self.sigma_dp**2
             )
-            for name, param in self.model.named_parameters():
-                clean_name = self._get_clean_param_name(name)
-                control_key = name if name in self.c_global else clean_name
 
-                if control_key in self.c_global and control_key in self.c_local:
-                    c_global = self.c_global[control_key]
-                    c_local = self.c_local[control_key]
-                    param.grad += (c_global - c_local).to(self.device)
-                    
-            self.optimizer.step()
+    def _fit_variant_2_step_noise_step_jse(self):
+        """Algorithm Variant 2: Step-wise DP training with per-step JSE.
 
-            if self.lr_scheduler is not None:
-                self.lr_scheduler.step()
-
-        # Use parent's post-processing for SCAFFOLD control variates
-        self._step_noise_post_processing_with_integrated_control_variates()
-
-    def _fit_variant_3_step_noise_final_jse(self):
-        """Algorithm Variant 5: Step-wise DP with final JSE.
-
-        Uses parent's step_noise training, then applies JSE to final parameter differences.
+        Executes training with per-step DP processing and JSE using the new
+        torch.func based gradient computation.
         """
         self.model.train()
         self.dataset.train()
 
+        # Local training loop with per-step DP processing and JSE
         for _ in range(self.local_epoch):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
-            for param in self.model.parameters():
-                if hasattr(param, 'grad_sample'):
-                    param.grad_sample = None
-
-            logits = self.model(x)
-            loss = self.criterion(logits, y)
-            loss.backward()
-
-            # Use parent's DP processing without JSE
-            self._clip_and_add_noise_with_scaffold()
-                    
+            # Use new gradient computation with step-wise JSE
+            self._compute_clipped_gradients_with_step_jse(x, y, add_noise=True)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
-        # Apply final JSE to parameter differences before SCAFFOLD post-processing
-        self._step_noise_final_jse_post_processing_with_integrated_control_variates()
+        self._compute_param_diff_and_control_variates(add_noise=False)
 
+    def _fit_variant_3_step_noise_final_jse(self):
+        """Algorithm Variant 3: Gradient-level noise + Final global JSE on parameter differences.
 
-    @torch.no_grad()
-    def _step_noise_final_jse_post_processing_with_integrated_control_variates(self):
-        """Post-processing for step_noise_final_jse variant.
+        Training flow:
+        1. Standard step-wise DP training (reuse parent class logic)
+        2. Apply global JSE to final parameter differences with accumulated noise variance
 
-        Applies JSE to final parameter differences, then updates SCAFFOLD control variates.
+        Global JSE processes all parameter differences simultaneously using unified
+        shrinkage based on the combined norm of all parameters, providing consistent
+        and mathematically principled shrinkage across the entire model.
         """
-        # Initialize storage
-        self.model_params_diff = {}
-        self.c_delta = self.OrderedDict() if hasattr(self, 'OrderedDict') else {}
-        self.c_delta = OrderedDict()
-        c_plus = OrderedDict()
+        # Execute standard step-wise DP training using parent class
+        self._step_noise_training()
 
-        coef = 1 / (self.local_epoch * self.args.optimizer.lr)
-
-        # First, collect parameter differences for JSE processing
-        for name, param in self.model.named_parameters():
-            if name in self.regular_model_params:
-                param_diff = param.data - self.regular_model_params[name].to(param.device)
-                clean_name = self._get_clean_param_name(name)
-                self.model_params_diff[clean_name] = param_diff.clone().cpu()
-
-        # Apply global JSE to parameter differences with k_factor for accumulated noise
+        # Apply global JSE to final parameter differences
         JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.model_params_diff, self.sigma_dp ** 2, k_factor=self.local_epoch
+            self.model_params_diff, self.sigma_dp**2
         )
 
-        # Then, update SCAFFOLD control variates using original parameter differences
-        for name, param in self.model.named_parameters():
-            if name in self.regular_model_params:
-                param_diff = param.data - self.regular_model_params[name].to(param.device)
 
-                # SCAFFOLD control variate processing
-                clean_name = self._get_clean_param_name(name)
-                control_key = name if name in self.c_global else clean_name
-
-                if control_key in self.c_global and control_key in self.c_local:
-                    c_global = self.c_global[control_key]
-                    c_local = self.c_local[control_key]
-
-                    param_diff_cpu = param_diff.cpu()
-                    c_plus[control_key] = c_local - c_global - coef * param_diff_cpu
-                    self.c_delta[control_key] = c_plus[control_key] - c_local
-
-        # Update local control variates
-        self.c_local = c_plus
 
     def package(self):
         """Package client data including DP parameters, SCAFFOLD control variates, and JSE information."""
