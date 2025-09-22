@@ -77,8 +77,9 @@ class DPScaffoldClient(DPFedAvgLocalClient):
         if len(per_sample_norms) == 0:
             return
 
-        # Calculate DP noise standard deviation: σ_DP = C * σ_g
-        self.sigma_dp = self._cached_step_sigma_dp
+        # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
+        actual_batch_size = per_sample_norms.size(0)
+        self.sigma_dp = self.clip_norm * self.sigma / actual_batch_size
 
         # Calculate per-sample clipping factors
         per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
@@ -196,7 +197,8 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
             # DP processing: optionally add noise to parameter difference
             if add_noise:
-                self.sigma_dp = self._cached_step_sigma_dp * self.local_epoch * self.args.optimizer.lr
+                # σ_DP = C * K * η_l * σ_g / b_actual (for parameter-level noise)
+                self.sigma_dp = (self.clip_norm * self.sigma / self.args.common.batch_size) * self.local_epoch * self.args.optimizer.lr
                 noise = torch.randn_like(param_diff, device=param_diff.device) * self.sigma_dp
                 noisy_diff = param_diff + noise
                 self.model_params_diff[name] = noisy_diff.cpu()

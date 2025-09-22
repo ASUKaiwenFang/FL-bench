@@ -66,10 +66,6 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         # Use parent class last_noise training
         self._last_noise_training()
 
-        # Apply server-side JSE to parameter differences
-        JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.model_params_diff, self.sigma_dp**2
-        )
 
     def _compute_clipped_gradients_with_step_jse(self, inputs, targets, add_noise=True):
         """Compute clipped per-sample gradients with step-wise JSE application.
@@ -128,9 +124,9 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         # Execute standard step-wise DP training using parent class
         self._step_noise_training()
 
-        # Apply global JSE to final parameter differences
+        # Apply global JSE to final parameter differences with K factor
         JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.model_params_diff, self.sigma_dp**2
+            self.model_params_diff, self.sigma_dp**2, k_factor=self.local_epoch
         )
 
 

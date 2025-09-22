@@ -26,8 +26,8 @@ model:
 # Training settings
 common:
   seed: 42
-  join_ratio: 0.01
-  global_epoch: 50
+  join_ratio: 0.1
+  global_epoch: 100
   local_epoch: 5
   batch_size: 32
 
@@ -35,11 +35,10 @@ common:
 dp_scaffstein:
   algorithm_variant: "step_noise_final_jse"  # Gradient-level noise + final JSE
   clip_norm: 1.0                             # Gradient clipping threshold
-  sigma: 0.1                                 # Noise standard deviation parameter
+  sigma: 1                                 # Noise standard deviation parameter
   global_lr: 1.0                             # SCAFFOLD global learning rate
 
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.1
-  momentum: 0.9
+  lr: 0.5

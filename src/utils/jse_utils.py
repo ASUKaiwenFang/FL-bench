@@ -149,8 +149,18 @@ class JSEProcessor:
         # Input validation
         JSEProcessor._validate_noise_variance(noise_variance)
 
+        # Step 1: Detect device from first valid parameter gradient
+        device = None
+        for param in model_parameters:
+            if param.grad is not None and param.grad.numel() > 0:
+                device = param.grad.device
+                break
+
+        if device is None:
+            return  # No valid gradients found
+
         # Step 1: Compute global statistics directly without intermediate structures
-        total_norm_sq = torch.tensor(0.0)
+        total_norm_sq = torch.tensor(0.0, device=device)
         total_elements = 0
         grad_params = []
 
@@ -176,7 +186,7 @@ class JSEProcessor:
         shrinkage_factor = shrinkage_numerator / total_norm_sq
 
         # Print shrinkage factor statistics before clamp
-        print(f"[JSE] apply_global_jse_to_gradients: shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}")
+        # print(f"[JSE] apply_global_jse_to_gradients: shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}")
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
@@ -236,8 +246,18 @@ class JSEProcessor:
         JSEProcessor._validate_noise_variance(noise_variance)
         JSEProcessor._validate_k_factor(k_factor)
 
+        # Step 1: Detect device from first valid tensor
+        device = None
+        for tensor in param_diff_dict.values():
+            if tensor.numel() > 0:
+                device = tensor.device
+                break
+
+        if device is None:
+            return  # No valid tensors found
+
         # Step 1: Compute global statistics without concatenation
-        total_norm_sq = torch.tensor(0.0)
+        total_norm_sq = torch.tensor(0.0, device=device)
         total_elements = 0
 
         for tensor in param_diff_dict.values():
@@ -262,11 +282,11 @@ class JSEProcessor:
         shrinkage_factor = shrinkage_numerator / total_norm_sq
 
         # Print shrinkage factor statistics before clamp
-        print(f"[JSE] apply_global_jse_to_parameter_diff: shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}")
+        # print(f"[JSE] apply_global_jse_to_parameter_diff: shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}")
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
+        # shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Step 3: Apply shrinkage to each parameter individually in-place
 

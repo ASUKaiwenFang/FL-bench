@@ -28,9 +28,8 @@ common:
 # DP-FedStein specific parameters - Last Noise Server JSE Variant
 dp_fed_stein:
   algorithm_variant: "last_noise_server_jse"  # Parameter-level noise + server-side JSE
-  jse_enabled: true                           # Enable James-Stein estimator
   clip_norm: 1.0                             # Gradient clipping threshold
-  sigma: 0.1                                 # Noise standard deviation parameter
+  sigma: 1                                # Noise standard deviation parameter
 
 optimizer:
   name: sgd # [sgd, adam, adamw, rmsprop, adagrad]

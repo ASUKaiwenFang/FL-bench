@@ -105,8 +105,6 @@ class DPFedAvgLocalClient(FedAvgClient):
             # Legacy numeric support
             self.algorithm_variant = AlgorithmVariant(variant_config)
 
-        # Pre-compute sigma_dp for step_noise algorithm (constant value)
-        self._cached_step_sigma_dp = self.clip_norm * self.sigma / self.args.common.batch_size
         # Cache for model parameters dictionary
         self._cached_model_params = None
         self._cached_model_buffers = None
@@ -202,8 +200,10 @@ class DPFedAvgLocalClient(FedAvgClient):
     def _last_noise_post_processing(self):
         """Post-processing for last_noise variant: integrated parameter difference calculation and noise addition."""
 
-        # σ_DP = C * K * η_l * σ_g / b
-        self.sigma_dp = self._cached_step_sigma_dp * self.local_epoch * self.args.optimizer.lr 
+        # σ_DP = C * K * η_l * σ_g / b_actual
+        # Note: For last_noise variant, we use configured batch_size as this represents
+        # the expected batch size used throughout training
+        self.sigma_dp = (self.clip_norm * self.sigma / self.args.common.batch_size) * self.local_epoch * self.args.optimizer.lr 
 
         # Calculate noisy parameter differences and store them
 
@@ -244,19 +244,17 @@ class DPFedAvgLocalClient(FedAvgClient):
         if len(per_sample_norms) == 0:
             return
 
-        # Calculate DP noise standard deviation: σ_DP = C * σ_g
-        self.sigma_dp = self._cached_step_sigma_dp
+        # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
+        actual_batch_size = per_sample_norms.size(0)
+        self.sigma_dp = self.clip_norm * self.sigma / actual_batch_size
 
         # Calculate per-sample clipping factors
         per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
 
-        # Pre-compute clip shape dimensions for optimization
-        clip_factor_size = per_sample_clip_factor.size(0)
-
         # Process gradients: clip → mean → add_noise
         for param_name, per_sample_grad in per_sample_grads.items():
             # Vectorized clipping using optimized tensor multiplication
-            clip_shape = [clip_factor_size] + [1] * (per_sample_grad.ndim - 1)
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
             clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
 
             # Average clipped gradients across batch

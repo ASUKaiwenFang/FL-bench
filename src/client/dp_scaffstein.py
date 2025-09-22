@@ -135,9 +135,10 @@ class DPScaffSteinClient(DPScaffoldClient):
         # Execute standard step-wise DP training using parent class
         self._step_noise_training()
 
-        # Apply global JSE to final parameter differences
+        # Apply global JSE to final parameter differences with K factor
+        # Following Algorithm 3: shrinkage = (d-2)K·σ²_DP / ||A||², where K = local_epoch
         JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.model_params_diff, self.sigma_dp**2
+            self.model_params_diff, self.sigma_dp**2, k_factor=self.local_epoch
         )
 
 

@@ -1,0 +1,12 @@
+# source .env/bin/activate
+# python demo/main_dp_fedavg_step_noise.py
+# python demo/main_dp_fedavg_last_noise.py
+# python demo/main_dp_local.py
+# python demo/main_dp_fedstein_step_noise_step_jse.py
+# python demo/main_dp_fedstein_step_noise_final_jse.py
+# python demo/main_dp_fedstein_last_noise_server_jse.py
+# python demo/main_dp_scaffold_step_noise.py
+# python demo/main_dp_scaffold_last_noise.py
+python demo/main_dp_scaffstein_step_noise_final_jse.py
+python demo/main_dp_scaffstein_last_noise_server_jse.py
+python demo/main_dp_scaffstein_step_noise_step_jse.py

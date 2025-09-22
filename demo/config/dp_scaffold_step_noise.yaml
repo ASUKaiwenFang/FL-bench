@@ -38,3 +38,7 @@ dp_scaffold:
   sigma: 1                       # Noise standard deviation parameter
   global_lr: 1.0                   # SCAFFOLD global learning rate
 
+# Optimizer settings
+optimizer:
+  name: sgd
+  lr: 0.01
