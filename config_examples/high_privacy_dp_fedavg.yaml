@@ -1,0 +1,35 @@
+# High privacy protection configuration (ε ≈ 3.56)
+# Suitable for scenarios with extremely high privacy requirements
+
+defaults:
+  - defaults
+  - _self_
+
+hydra:
+  run:
+    dir: ../../out/${method}/${dataset.name}/${now:%Y-%m-%d-%H-%M-%S}
+
+method: dp_fedavg_local
+
+model:
+  name: 2nn
+
+dataset:
+  name: mnist
+
+common:
+  seed: 42
+  join_ratio: 0.1        # 10% users participate per round
+  global_epoch: 100      # 100 communication rounds
+  local_epoch: 5         # 5 local updates per round
+  batch_size: 32
+
+# High privacy configuration: high noise, strong protection
+dp_fedavg_local:
+  algorithm_variant: "step_noise"
+  clip_norm: 1.0         # Gradient clipping
+  sigma: 5               # High noise → ε ≈ 3.56
+
+optimizer:
+  name: sgd
+  lr: 0.01               # May need to slightly increase learning rate to compensate for noise

@@ -109,6 +109,9 @@ class DPFedAvgLocalClient(FedAvgClient):
         self._cached_model_params = None
         self._cached_model_buffers = None
 
+        # Numerical stability epsilon
+        self.numerical_epsilon = 1e-6
+
 
     def set_parameters(self, package: dict[str, Any]):
         super().set_parameters(package)

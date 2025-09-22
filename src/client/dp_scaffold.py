@@ -84,13 +84,10 @@ class DPScaffoldClient(DPFedAvgLocalClient):
         # Calculate per-sample clipping factors
         per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
 
-        # Pre-compute clip shape dimensions for optimization
-        clip_factor_size = per_sample_clip_factor.size(0)
-
         # Process gradients: clip → mean → add_noise → add SCAFFOLD correction
         for param_name, per_sample_grad in per_sample_grads.items():
             # Vectorized clipping using optimized tensor multiplication
-            clip_shape = [clip_factor_size] + [1] * (per_sample_grad.ndim - 1)
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
             clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
 
             # Average clipped gradients across batch
