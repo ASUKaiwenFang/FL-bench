@@ -1,33 +1,16 @@
-echo "#!/bin/bash" > jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -A PPFL_FM" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -k doe" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -l filesystems=home:eagle" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -l select=1:ngpus=1:gputype=A100" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -q preemptable" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -l walltime=06:00:00" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -r y" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -j oe" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -N jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "#PBS -o ./polaris_pbs/jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.log" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "module use /soft/modulefiles" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "module load conda" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "conda activate" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-echo "python /home/mryu2/FedStein/run_CDP.py --device_name=cuda --dataset=$1 --partition=$2 --model=$3 --n_clients=$4 --eta_g=$5 --eta_l=$6 --clip_bound=$7 --n_local_epochs=$8 --aggregation_method=$9 --sigma=${10} --seed=${11}" >> jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-qsub jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-rm jobscript_$1_$2_$3_$4_$5_$6_$7_$8_$9_${10}_${11}.sh
-
-
-#!/bin/sh
-#SBATCH -t 0-01:00:00
-
-ROUND_VERSION="final_results"
-ROUND_DESCRIPTION="For new datasets"
-EXPERIMENT_VERSION="cflp_milp"
-EXPERIMENT_DESCRIPTION="new dataset"
+#!/bin/bash
+# FL-bench DP-FedAvg-Local Experiments with PBS
+# This script runs differential privacy federated learning experiments
+# with different sigma values using PBS job scheduler
 
 # Define variables to make the script more readable and maintainable
-OUTPUT_DIR="experiments/${ROUND_VERSION}/${EXPERIMENT_VERSION}"
-ERR_OUT_DIR="${OUTPUT_DIR}/results"
+EXPERIMENT_VERSION="dp_fedavg_local_sigma_sweep"
+EXPERIMENT_DESCRIPTION="DP-FedAvg-Local experiments with sigma values: 0.1, 0.5, 1, 10"
+
+# Define directory variables
+OUTPUT_DIR="experiments/${EXPERIMENT_VERSION}"
+LOG_DIR="${OUTPUT_DIR}/logs"
+JOBSCRIPT_DIR="./job_scripts"
 
 # Check if experiment directory already exists
 if [ -d "${OUTPUT_DIR}" ]; then
@@ -37,108 +20,76 @@ fi
 
 # Create necessary directories
 mkdir -p "${OUTPUT_DIR}"
-mkdir -p "${ERR_OUT_DIR}"
-
-# Define job script directory
-JOBSCRIPT_DIR="./job_scripts"
-# mkdir -p "${JOBSCRIPT_DIR}"
-
-# Copy src directory to output directory
-cp -r final_scripts/cflp_milp.jl "${OUTPUT_DIR}/cflp_milp.jl"
+mkdir -p "${LOG_DIR}"
+mkdir -p "${JOBSCRIPT_DIR}"
 
 # Create experiment metadata markdown file
 cat > "${OUTPUT_DIR}/experiment_metadata.md" << EOF
 # Experiment Metadata
 
-- **Round Version**: ${ROUND_VERSION}
-- **Round Description**: ${ROUND_DESCRIPTION}
 - **Experiment Version**: ${EXPERIMENT_VERSION}
 - **Experiment Description**: ${EXPERIMENT_DESCRIPTION}
+- **Method**: dp_fedavg_local
+- **Sigma Values**: [0.1, 0.5, 1, 10]
 - **Date**: $(date "+%Y-%m-%d %H:%M:%S")
+- **Working Directory**: $(pwd)
 EOF
 
-# Define an array of instance names
-instances=(
-    # "T100x100_3_1" "T100x100_3_2" "T100x100_3_3" "T100x100_3_4" "T100x100_3_5"
-    # "T100x100_5_1" "T100x100_5_2" "T100x100_5_3" "T100x100_5_4" "T100x100_5_5"
-    # "T100x100_10_1" "T100x100_10_2" "T100x100_10_3" "T100x100_10_4" "T100x100_10_5"
+# For testing
+methods=("dp_fedavg_local" "dp_scaffold" "dp_fed_stein" "dp_scaffstein")
+sigma_values=(0.1)
+lr_values=(0.01)
+global_epoch_values=(100)
+local_epoch_values=(5)
 
-    # "T200x100_3_1" "T200x100_3_2" "T200x100_3_3" "T200x100_3_4" "T200x100_3_5"
-    # "T200x100_5_1" "T200x100_5_2" "T200x100_5_3" "T200x100_5_4" "T200x100_5_5"
-    # "T200x100_10_1" "T200x100_10_2" "T200x100_10_3" "T200x100_10_4" "T200x100_10_5"
 
-    # "T500x100_3_1" "T500x100_3_2" "T500x100_3_3" "T500x100_3_4" "T500x100_3_5"
-    # "T500x100_5_1" "T500x100_5_2" "T500x100_5_3" "T500x100_5_4" "T500x100_5_5"
-    # "T500x100_10_1" "T500x100_10_2" "T500x100_10_3" "T500x100_10_4" "T500x100_10_5"
+# For full experiment
+# methods=("dp_fedavg_local" "dp_scaffold" "dp_fed_stein" "dp_scaffstein")
+# sigma_values=(0.1 0.5 1 10)
+# lr_values=(0.01 0.05 0.1)
+# global_epoch_values=(100 200 300)
+# local_epoch_values=(5 10 15)
 
-    # "T200x200_3_1" "T200x200_3_2" "T200x200_3_3" "T200x200_3_4" "T200x200_3_5"
-    # "T200x200_5_1" "T200x200_5_2" "T200x200_5_3" "T200x200_5_4" "T200x200_5_5"
-    # "T200x200_10_1" "T200x200_10_2" "T200x200_10_3" "T200x200_10_4" "T200x200_10_5"
+for method in "${methods[@]}"; do
+    for sigma in "${sigma_values[@]}"; do   
+        for lr in "${lr_values[@]}"; do
+            for global_epoch in "${global_epoch_values[@]}"; do
+                for local_epoch in "${local_epoch_values[@]}"; do
+                    JOBSCRIPT_FILE="${JOBSCRIPT_DIR}/${method}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}.sh"
 
-    # "T500x200_3_1" "T500x200_3_2" "T500x200_3_3" "T500x200_3_4" "T500x200_3_5"
-    # "T500x200_5_1" "T500x200_5_2" "T500x200_5_3" "T500x200_5_4" "T500x200_5_5"
-    # "T500x200_10_1" "T500x200_10_2" "T500x200_10_3" "T500x200_10_4" "T500x200_10_5"
+                    # Create job script file
+                    echo "#!/bin/bash" > "${JOBSCRIPT_FILE}"
 
-    "T300x300_5_1" "T300x300_5_2" "T300x300_5_3" "T300x300_5_4" "T300x300_5_5"
-    "T300x300_10_1" "T300x300_10_2" "T300x300_10_3" "T300x300_10_4" "T300x300_10_5"
-    # "T300x300_15_1" "T300x300_15_2" "T300x300_15_3" "T300x300_15_4" "T300x300_15_5"
-    # "T300x300_20_1" "T300x300_20_2" "T300x300_20_3" "T300x300_20_4" "T300x300_20_5"
+                    # Add PBS directives
+                    echo "#PBS -A PPFL_FM" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -k doe" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -l filesystems=home:eagle" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -l select=1:ngpus=1:gputype=A100" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -q preemptable" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -l walltime=06:00:00" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -r y" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -j oe" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -N ${method}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -o ${LOG_DIR}/${method}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}.log" >> "${JOBSCRIPT_FILE}"
 
-    # "T1500x300_5_1" "T1500x300_5_2" "T1500x300_5_3" "T1500x300_5_4" "T1500x300_5_5"
-    # "T1500x300_10_1" "T1500x300_10_2" "T1500x300_10_3" "T1500x300_10_4" "T1500x300_10_5"
-    # "T1500x300_15_1" "T1500x300_15_2" "T1500x300_15_3" "T1500x300_15_4" "T1500x300_15_5"
-    # "T1500x300_20_1" "T1500x300_20_2" "T1500x300_20_3" "T1500x300_20_4" "T1500x300_20_5"
+                    # Add environment setup
+                    echo "module use /soft/modulefiles" >> "${JOBSCRIPT_FILE}"
+                    echo "module load conda" >> "${JOBSCRIPT_FILE}"
+                    echo "conda activate base" >> "${JOBSCRIPT_FILE}"
+                    echo "cd FL-bench" >> "${JOBSCRIPT_FILE}"
 
-    "T500x500_5_1" "T500x500_5_2" "T500x500_5_3" "T500x500_5_4" "T500x500_5_5"
-    "T500x500_10_1" "T500x500_10_2" "T500x500_10_3" "T500x500_10_4" "T500x500_10_5"
-    "T500x500_15_1" "T500x500_15_2" "T500x500_15_3" "T500x500_15_4" "T500x500_15_5"
-    "T500x500_20_1" "T500x500_20_2" "T500x500_20_3" "T500x500_20_4" "T500x500_20_5"
+                    # Add experiment execution command
+                    echo "python experiment.py method=${method} ${method}.sigma=${sigma} optimizer.lr=${lr} common.global_epoch=${global_epoch} common.local_epoch=${local_epoch}" >> "${JOBSCRIPT_FILE}"
 
-    # "T1500x600_5_1" "T1500x600_5_2" "T1500x600_5_3" "T1500x600_5_4" "T1500x600_5_5"
-    # "T1500x600_10_1" "T1500x600_10_2" "T1500x600_10_3" "T1500x600_10_4" "T1500x600_10_5"
-    # "T1500x600_15_1" "T1500x600_15_2" "T1500x600_15_3" "T1500x600_15_4" "T1500x600_15_5"
-    # "T1500x600_20_1" "T1500x600_20_2" "T1500x600_20_3" "T1500x600_20_4" "T1500x600_20_5"
+                    # Submit job
+                    qsub "${JOBSCRIPT_FILE}"
 
-    # "T700x700_5_1" "T700x700_5_2" "T700x700_5_3" "T700x700_5_4" "T700x700_5_5"
-    # "T700x700_10_1" "T700x700_10_2" "T700x700_10_3" "T700x700_10_4" "T700x700_10_5"
-    # "T700x700_15_1" "T700x700_15_2" "T700x700_15_3" "T700x700_15_4" "T700x700_15_5"
-    # "T700x700_20_1" "T700x700_20_2" "T700x700_20_3" "T700x700_20_4" "T700x700_20_5"
+                    # Remove temporary job script
+                    rm "${JOBSCRIPT_FILE}"
 
-    # "T1000x1000_5_1" "T1000x1000_5_2" "T1000x1000_5_3" "T1000x1000_5_4" "T1000x1000_5_5"
-    # "T1000x1000_10_1" "T1000x1000_10_2" "T1000x1000_10_3" "T1000x1000_10_4" "T1000x1000_10_5"
-    # "T1000x1000_15_1" "T1000x1000_15_2" "T1000x1000_15_3" "T1000x1000_15_4" "T1000x1000_15_5"
-    # "T1000x1000_20_1" "T1000x1000_20_2" "T1000x1000_20_3" "T1000x1000_20_4" "T1000x1000_20_5"
-)
-
-# Loop through the instances and create a job script for each
-for instance in "${instances[@]}"; do
-    JOBSCRIPT_FILE="${JOBSCRIPT_DIR}/${instance}.sh"
-    
-    # Create job script file
-    echo "#!/bin/bash" > "${JOBSCRIPT_FILE}"
-
-    # echo "#SBATCH -p htc" >> "${JOBSCRIPT_FILE}"
-    echo "#SBATCH -q grp_gbyeon" >> "${JOBSCRIPT_FILE}"
-    echo "#SBATCH -N 1" >> "${JOBSCRIPT_FILE}"
-    echo "#SBATCH -n 1" >> "${JOBSCRIPT_FILE}"
-    echo "#SBATCH -c 7" >> "${JOBSCRIPT_FILE}"
-    echo "#SBATCH --nodelist=pcc036" >> "${JOBSCRIPT_FILE}"
-    echo "#SBATCH --mem=60G" >> "${JOBSCRIPT_FILE}"
-
-    echo "#SBATCH -t 0-04:30:00" >> "${JOBSCRIPT_FILE}"
-    echo "#SBATCH -o ${ERR_OUT_DIR}/${instance}.out%j" >> "${JOBSCRIPT_FILE}"
-    echo "#SBATCH -e ${ERR_OUT_DIR}/${instance}.err%j" >> "${JOBSCRIPT_FILE}"
-
-    # Load necessary modules
-    echo "module purge" >> "${JOBSCRIPT_FILE}"
-    echo "module load julia" >> "${JOBSCRIPT_FILE}"
-    echo "module load cplex" >> "${JOBSCRIPT_FILE}"
-    echo "module load gurobi" >> "${JOBSCRIPT_FILE}"
-
-    # Run Julia script with algorithm parameters
-    echo "julia --project=. final_scripts/cflp_milp.jl --instance ${instance} --output_dir ${OUTPUT_DIR}" >> "${JOBSCRIPT_FILE}"
-
-    # Submit job
-    sbatch "${JOBSCRIPT_FILE}"
-    rm "${JOBSCRIPT_FILE}"
+                    echo "Submitted job for method=${method}, sigma=${sigma}, lr=${lr}, global_epoch=${global_epoch}, local_epoch=${local_epoch}"
+                done
+            done
+        done
+    done
 done
