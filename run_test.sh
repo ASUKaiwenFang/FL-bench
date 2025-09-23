@@ -79,7 +79,7 @@ for method in "${methods[@]}"; do
                     echo "cd FL-bench" >> "${JOBSCRIPT_FILE}"
 
                     # Add experiment execution command
-                    echo "python experiment.py method=${method} ${method}.sigma=${sigma} optimizer.lr=${lr} common.global_epoch=${global_epoch} common.local_epoch=${local_epoch}" >> "${JOBSCRIPT_FILE}"
+                    echo "python experiment.py method=${method} ${method}.sigma=${sigma} optimizer.lr=${lr} common.global_epoch=${global_epoch} common.local_epoch=${local_epoch} hydra.run.dir=${OUTPUT_DIR}" >> "${JOBSCRIPT_FILE}"
 
                     # Submit job
                     qsub "${JOBSCRIPT_FILE}"
