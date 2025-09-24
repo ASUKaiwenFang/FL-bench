@@ -1,0 +1,36 @@
+# DP-FedStein Last Noise Server JSE Variant Configuration
+# This configuration uses parameter-level noise addition with server-side JSE shrinkage
+
+defaults:
+  - defaults
+  - _self_
+
+# Override Hydra output directory to use 'out' instead of 'outputs'
+hydra:
+  run:
+    dir: ../../out/${method}/${dataset.name}/${now:%Y-%m-%d-%H-%M-%S}
+
+# Override method to use DP-FedStein
+method: dp_fed_stein
+
+# Model settings
+model:
+  name: 2nn
+
+# Training settings
+common:
+  seed: 42
+  join_ratio: 0.1
+  global_epoch: 100
+  local_epoch: 5
+  batch_size: 32
+
+# DP-FedStein specific parameters - Last Noise Server JSE Variant
+dp_fed_stein:
+  algorithm_variant: "last_noise_server_jse"  # Parameter-level noise + server-side JSE
+  clip_norm: 1.0                             # Gradient clipping threshold
+  sigma: 1                                # Noise standard deviation parameter
+
+optimizer:
+  name: sgd # [sgd, adam, adamw, rmsprop, adagrad]
+  lr: 0.5

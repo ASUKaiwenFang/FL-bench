@@ -36,7 +36,7 @@ cat > "${OUTPUT_DIR}/experiment_metadata.md" << EOF
 EOF
 
 # For testing
-methods=("dp_fedavg_local" "dp_scaffold" "dp_fed_stein" "dp_scaffstein")
+config_files=("dp_fedavg_step_noise" "dp_fedavg_last_noise" "dp_scaffold_step_noise" "dp_scaffold_last_noise" "dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse" "dp_scaffstein_step_noise_step_jse" "dp_scaffstein_step_noise_final_jse" "dp_scaffstein_last_noise_server_jse")
 sigma_values=(0.1)
 lr_values=(0.01)
 global_epoch_values=(100)
@@ -44,18 +44,18 @@ local_epoch_values=(5)
 
 
 # For full experiment
-# methods=("dp_fedavg_local" "dp_scaffold" "dp_fed_stein" "dp_scaffstein")
+# config_files=("dp_fedavg_step_noise" "dp_fedavg_last_noise" "dp_scaffold_step_noise" "dp_scaffold_last_noise" "dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse" "dp_scaffstein_step_noise_step_jse" "dp_scaffstein_step_noise_final_jse" "dp_scaffstein_last_noise_server_jse")
 # sigma_values=(0.1 0.5 1 10)
 # lr_values=(0.01 0.05 0.1)
 # global_epoch_values=(100 200 300)
 # local_epoch_values=(5 10 15)
 
-for method in "${methods[@]}"; do
+for config_file in "${config_files[@]}"; do
     for sigma in "${sigma_values[@]}"; do   
         for lr in "${lr_values[@]}"; do
             for global_epoch in "${global_epoch_values[@]}"; do
                 for local_epoch in "${local_epoch_values[@]}"; do
-                    JOBSCRIPT_FILE="${JOBSCRIPT_DIR}/${method}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}.sh"
+                    JOBSCRIPT_FILE="${JOBSCRIPT_DIR}/${config_file}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}.sh"
 
                     # Create job script file
                     echo "#!/bin/bash" > "${JOBSCRIPT_FILE}"
@@ -69,8 +69,8 @@ for method in "${methods[@]}"; do
                     echo "#PBS -l walltime=06:00:00" >> "${JOBSCRIPT_FILE}"
                     echo "#PBS -r y" >> "${JOBSCRIPT_FILE}"
                     echo "#PBS -j oe" >> "${JOBSCRIPT_FILE}"
-                    echo "#PBS -N ${method}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}" >> "${JOBSCRIPT_FILE}"
-                    echo "#PBS -o ${LOG_DIR}/${method}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}.log" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -N ${config_file}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}" >> "${JOBSCRIPT_FILE}"
+                    echo "#PBS -o ${LOG_DIR}/${config_file}_sigma_${sigma}_lr_${lr}_global_epoch_${global_epoch}_local_epoch_${local_epoch}.log" >> "${JOBSCRIPT_FILE}"
 
                     # Add environment setup
                     echo "module use /soft/modulefiles" >> "${JOBSCRIPT_FILE}"
@@ -78,8 +78,19 @@ for method in "${methods[@]}"; do
                     echo "conda activate base" >> "${JOBSCRIPT_FILE}"
                     echo "cd FL-bench" >> "${JOBSCRIPT_FILE}"
 
+                    # Determine method parameter name for parameter overrides
+                    if [[ $config_file == dp_fedavg* ]]; then
+                        method_param="dp_fedavg_local"
+                    elif [[ $config_file == dp_scaffold_* ]]; then
+                        method_param="dp_scaffold"
+                    elif [[ $config_file == dp_fedstein* ]]; then
+                        method_param="dp_fed_stein"
+                    elif [[ $config_file == dp_scaffstein* ]]; then
+                        method_param="dp_scaffstein"
+                    fi
+
                     # Add experiment execution command
-                    echo "python experiment.py method=${method} ${method}.sigma=${sigma} optimizer.lr=${lr} common.global_epoch=${global_epoch} common.local_epoch=${local_epoch} hydra.run.dir=${OUTPUT_DIR}" >> "${JOBSCRIPT_FILE}"
+                    echo "python experiment.py --config-name ${config_file} ${method_param}.sigma=${sigma} optimizer.lr=${lr} common.global_epoch=${global_epoch} common.local_epoch=${local_epoch} hydra.run.dir=${OUTPUT_DIR}" >> "${JOBSCRIPT_FILE}"
 
                     # Submit job
                     qsub "${JOBSCRIPT_FILE}"
@@ -87,7 +98,7 @@ for method in "${methods[@]}"; do
                     # Remove temporary job script
                     rm "${JOBSCRIPT_FILE}"
 
-                    echo "Submitted job for method=${method}, sigma=${sigma}, lr=${lr}, global_epoch=${global_epoch}, local_epoch=${local_epoch}"
+                    echo "Submitted job for config=${config_file}, sigma=${sigma}, lr=${lr}, global_epoch=${global_epoch}, local_epoch=${local_epoch}"
                 done
             done
         done
