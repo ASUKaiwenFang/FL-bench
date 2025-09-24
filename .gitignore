@@ -48,3 +48,4 @@ data/domain/raw
 
 .venv/
 CLAUDE.md
+experiments/*

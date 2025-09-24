@@ -109,3 +109,8 @@ class DPScaffSteinServer(DPScaffoldServer):
         parser.add_argument("--algorithm_variant", type=str, default="step_noise_final_jse")
         parser.add_argument("--global_lr", type=float, default=1.0)
         return parser.parse_args(args_list)
+    
+    
+# Create an alias for main.py's naming convention compatibility
+# main.py expects class name to match "method_name + server" pattern
+Dp_scaffsteinServer = DPScaffSteinServer
