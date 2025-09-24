@@ -1,6 +1,6 @@
 source .venv/bin/activate
 
-EXPERIMENT_VERSION="dp_scaffold_1"
+EXPERIMENT_VERSION="dp_jse_1"
 EXPERIMENT_DESCRIPTION="DP-FedAvg-Local experiments with sigma values: 0.1, 0.5, 1, 10 and lr values: 0.01, 0.05, 0.1"
 
 # Define directory variables
@@ -28,20 +28,20 @@ cat > "${OUTPUT_DIR}/experiment_metadata.md" << EOF
 - **Working Directory**: $(pwd)
 EOF
 
-max_concurrent=6  
+max_concurrent=4  
 current_jobs=0
 total_gpus=2
 
 # For testing
 # config_files=("dp_fedavg_step_noise" "dp_fedavg_last_noise")
-config_files=("dp_scaffold_step_noise" "dp_scaffold_last_noise")
+# config_files=("dp_scaffold_step_noise" "dp_scaffold_last_noise")
 # config_files=("dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse")
 # config_files=("dp_scaffstein_step_noise_step_jse" "dp_scaffstein_step_noise_final_jse" "dp_scaffstein_last_noise_server_jse")
-
-sigma_values=(0.1 0.5 1 10)
-lr_values=(0.01 0.05 0.1)
+config_files=("dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse" "dp_scaffstein_step_noise_step_jse" "dp_scaffstein_step_noise_final_jse" "dp_scaffstein_last_noise_server_jse")
+sigma_values=(0.1 1 10)
+lr_values=(0.01 0.1 0.5)
 global_epoch_values=(200)
-local_epoch_values=(5 10 15)
+local_epoch_values=(5 10)
 
 echo "Starting parallel experiments with max $max_concurrent concurrent jobs..."
 echo "Using $total_gpus GPUs"
