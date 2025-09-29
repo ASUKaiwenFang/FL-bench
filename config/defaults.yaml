@@ -105,7 +105,7 @@ common:
     # For example, Set client.test as true to evaluate on local testsets from selected clients with client local models.
     # Frequency is set by `client.interval`. Negative value for disabling.
     client:
-      interval: 100
+      interval: 1
       finetune_epoch: 0 # Number of epochs for clients fine-tunning their models before testing.
       train: false
       val: false
@@ -115,10 +115,10 @@ common:
     # Frequency is set by `server.interval`. Negative value for disabling.
     # NOTE: If clients have personalized model parameters like local buffers or classifiers, centralized evaluation for the global model is disabled.
     server:
-      interval: 1
+      interval: -1
       train: false
       val: false
-      test: true
+      test: false
       # Whether to evaluate the global model in train mode or eval mode.
       # Evaluating in train mode allows to get better batchnorm statistics, but is dependent on the order of the data.
       model_in_train_mode: false

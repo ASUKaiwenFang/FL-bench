@@ -1,6 +1,6 @@
 source .venv/bin/activate
 
-EXPERIMENT_VERSION="dp_jse_1"
+EXPERIMENT_VERSION="dp_fedstein_2"
 EXPERIMENT_DESCRIPTION="DP-FedAvg-Local experiments with sigma values: 0.1, 0.5, 1, 10 and lr values: 0.01, 0.05, 0.1"
 
 # Define directory variables
@@ -35,9 +35,9 @@ total_gpus=2
 # For testing
 # config_files=("dp_fedavg_step_noise" "dp_fedavg_last_noise")
 # config_files=("dp_scaffold_step_noise" "dp_scaffold_last_noise")
-# config_files=("dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse")
+config_files=("dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse")
 # config_files=("dp_scaffstein_step_noise_step_jse" "dp_scaffstein_step_noise_final_jse" "dp_scaffstein_last_noise_server_jse")
-config_files=("dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse" "dp_scaffstein_step_noise_step_jse" "dp_scaffstein_step_noise_final_jse" "dp_scaffstein_last_noise_server_jse")
+# config_files=("dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse" "dp_scaffstein_step_noise_step_jse" "dp_scaffstein_step_noise_final_jse" "dp_scaffstein_last_noise_server_jse")
 sigma_values=(0.1 1 10)
 lr_values=(0.01 0.1 0.5)
 global_epoch_values=(200)

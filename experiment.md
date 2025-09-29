@@ -30,7 +30,14 @@
     rates to have the decaying rate 1/√t.
 
 - Differentially private low-rank adaptation of large language model using federated learning
-    - Wesettheprivacyparameters ϵ = 8 andδ= 10e−5.
+    - Wesettheprivacyparameters ϵ = 8 and δ= 10e−5.
 
 - Differentially Private Federated Learning with Local Regularization and Sparsification
     - We set the privacy parameters ϵ = 8 
+
+
+
+# Discussion
+- For using JSE, a larger local learning rate has better performance. (dp-fedavg dp-scaffold normally use 0.01 other papers use even smaller) (dp-scaffold paper does not provide any information about the local learning rate)
+- Local epoches 5 has the best performance.
+- How to decide the ϵ and δ? (privacy level)
