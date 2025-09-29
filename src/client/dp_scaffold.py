@@ -41,6 +41,11 @@ class DPScaffoldClient(DPFedAvgLocalClient):
                 # Legacy numeric support
                 self.algorithm_variant = AlgorithmVariant(variant_config)
 
+        # Read data_sample_ratio from dp_scaffold config if not already set by parent
+        if not hasattr(self, 'data_sample_ratio') or self.data_sample_ratio is None:
+            if hasattr(self.args, 'dp_scaffold') and hasattr(self.args.dp_scaffold, 'data_sample_ratio'):
+                self.data_sample_ratio = self.args.dp_scaffold.data_sample_ratio
+
         # Initialize SCAFFOLD control variates using OrderedDict format
         self.c_local: OrderedDict[str, torch.Tensor] = OrderedDict()
         self.c_global: OrderedDict[str, torch.Tensor] = OrderedDict()

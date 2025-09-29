@@ -41,6 +41,11 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             # Default variant
             self.fed_stein_algorithm_variant = FedSteinAlgorithmVariant.STEP_NOISE_STEP_JSE
 
+        # Read data_sample_ratio from dp_fed_stein config if not already set by parent
+        if not hasattr(self, 'data_sample_ratio') or self.data_sample_ratio is None:
+            if hasattr(original_args, 'dp_fed_stein') and hasattr(original_args.dp_fed_stein, 'data_sample_ratio'):
+                self.data_sample_ratio = original_args.dp_fed_stein.data_sample_ratio
+
 
     def fit(self):
         """Train the model with local differential privacy and JSE enhancement.

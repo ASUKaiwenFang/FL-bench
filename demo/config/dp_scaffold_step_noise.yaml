@@ -35,7 +35,8 @@ common:
 dp_scaffold:
   algorithm_variant: "step_noise"  # Gradient-level noise addition
   clip_norm: 1.0                   # Gradient clipping threshold
-  sigma: 1                       # Noise standard deviation parameter
+  sigma: 1                         # Noise standard deviation parameter
+  data_sample_ratio: 0.2           # Data sampling ratio (0.2 = 20% of trainset)
   global_lr: 1.0                   # SCAFFOLD global learning rate
 
 # Optimizer settings

@@ -1,6 +1,7 @@
 from typing import Any
 from copy import deepcopy
 from enum import Enum
+import random
 import torch
 from src.client.fedavg import FedAvgClient
 from src.utils.dp_mechanisms import compute_per_sample_grads, compute_per_sample_norms
@@ -89,11 +90,11 @@ class DPFedAvgLocalClient(FedAvgClient):
 
     def __init__(self, **commons):
         super().__init__(**commons)
-        self.iter_trainloader = None
 
         # Initialize DP parameters using dynamic config access
         self.clip_norm = self._get_dp_config_value('clip_norm', 1.0)
         self.sigma = self._get_dp_config_value('sigma', 0.1)
+        self.data_sample_ratio = self._get_dp_config_value('data_sample_ratio', None)
         self.sigma_dp = None
         self.model_params_diff = None
 
@@ -115,12 +116,15 @@ class DPFedAvgLocalClient(FedAvgClient):
 
     def set_parameters(self, package: dict[str, Any]):
         super().set_parameters(package)
-        self.iter_trainloader = iter(self.trainloader)
         self.model_params_diff = {}
 
         # Cache model parameters dictionary for efficient access
         self._cached_model_params = {name: param for name, param in self.model.named_parameters()}
         self._cached_model_buffers = {name: buffer for name, buffer in self.model.named_buffers()}
+
+        # Recalculate effective batch size if data_sample_ratio is set
+        if self.data_sample_ratio is not None:
+            self.args.common.batch_size = round(self.data_sample_ratio * len(self.trainset))
 
     
     def fit(self):
@@ -312,11 +316,30 @@ class DPFedAvgLocalClient(FedAvgClient):
     
     
     def get_data_batch(self):
-        try:
-            x, y = next(self.iter_trainloader)
-            if len(x) <= 1:
-                x, y = next(self.iter_trainloader)
-        except StopIteration:
-            self.iter_trainloader = iter(self.trainloader)
-            x, y = next(self.iter_trainloader)
+        """Get a batch of data by random sampling from trainset.
+
+        This method samples data randomly from the full training set each time,
+        ensuring true randomness across steps when data_sample_ratio is used.
+
+        Returns:
+            Tuple of (x, y) tensors on the appropriate device
+        """
+        full_indices = list(self.trainset.indices)
+        batch_size = self.args.common.batch_size
+
+        # Handle edge case: batch_size might exceed trainset size
+        actual_sample_size = min(batch_size, len(full_indices))
+
+        # Ensure batch size > 1 to avoid batchnorm issues
+        if actual_sample_size <= 1:
+            actual_sample_size = min(2, len(full_indices))
+
+        # Random sampling from full training set
+        sampled_indices = random.sample(full_indices, actual_sample_size)
+
+        # Fetch sampled data
+        sampled_data = [self.dataset[idx] for idx in sampled_indices]
+        x = torch.stack([item[0] for item in sampled_data])
+        y = torch.tensor([item[1] for item in sampled_data])
+
         return x.to(self.device), y.to(self.device)

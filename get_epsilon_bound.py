@@ -11,7 +11,7 @@ import math
 T = 100
 K = 50
 M = 100
-R = int(0.8 * 5000)
+R = int(0.75 * 5000)
 
 # 0.8 : training ratio
 
@@ -26,7 +26,7 @@ s = 0.2
 # sigma_gaussian: standard deviation of Gaussian noise used in the algorithm
 # sigma_g: standard deviation of Gaussian noise "evaluated" for privacy towards a third party
 
-sigma_gaussian = 10.0
+sigma_gaussian = 30.0
 sigma_gaussian_actual = sigma_gaussian * np.sqrt(l * M)
 
 

@@ -52,6 +52,11 @@ class DPScaffSteinClient(DPScaffoldClient):
             # Default variant
             self.scaffstein_algorithm_variant = ScaffSteinAlgorithmVariant.STEP_NOISE_FINAL_JSE
 
+        # Read data_sample_ratio from dp_scaffstein config if not already set by parent
+        if not hasattr(self, 'data_sample_ratio') or self.data_sample_ratio is None:
+            if hasattr(original_args, 'dp_scaffstein') and hasattr(original_args.dp_scaffstein, 'data_sample_ratio'):
+                self.data_sample_ratio = original_args.dp_scaffstein.data_sample_ratio
+
     def fit(self):
         """Train the model with DP-ScaffStein algorithm.
 
