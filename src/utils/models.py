@@ -208,6 +208,49 @@ class LeNet5(DecoupledModel):
         self.classifier = nn.Linear(84, NUM_CLASSES[dataset])
 
 
+class NN1(DecoupledModel):
+    feature_length = {
+        "mnist": 784,
+        "medmnistS": 784,
+        "medmnistC": 784,
+        "medmnistA": 784,
+        "fmnist": 784,
+        "emnist": 784,
+        "femnist": 784,
+        "cifar10": 3072,
+        "cinic10": 3072,
+        "svhn": 3072,
+        "cifar100": 3072,
+        "usps": 1536,
+        "synthetic": DATA_SHAPE["synthetic"],
+    }
+
+    def __init__(self, dataset: str, pretrained):
+        super(NN1, self).__init__()
+        self.base = nn.Sequential(
+            nn.Linear(self.feature_length[dataset], 32),
+            nn.Sigmoid(),
+        )
+        self.classifier = nn.Linear(32, NUM_CLASSES[dataset])
+
+    def need_all_features(self):
+        return
+
+    def forward(self, x):
+        x = torch.flatten(x, start_dim=1)
+        x = self.classifier(self.base(x))
+        return x
+
+    def get_last_features(self, data, detach=True):
+        func = (lambda x: x.clone().detach()) if detach else (lambda x: x)
+        data = torch.flatten(data, start_dim=1)
+        data = self.base(data)
+        return func(data)
+
+    def get_all_features(self, x):
+        raise RuntimeError("NN1 has 0 Conv layer, so is unable to get all features.")
+
+
 class TwoNN(DecoupledModel):
     feature_length = {
         "mnist": 784,
@@ -488,6 +531,7 @@ MODELS = {
     "lenet5": LeNet5,
     "avgcnn": FedAvgCNN,
     "alex": AlexNet,
+    "nn1": NN1,
     "2nn": TwoNN,
     "squeeze0": partial(SqueezeNet, version="0"),
     "squeeze1": partial(SqueezeNet, version="1"),

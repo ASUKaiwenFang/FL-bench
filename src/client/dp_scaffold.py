@@ -202,6 +202,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
         # Get actual batch size
         actual_batch_size = next(iter(per_sample_grads.values())).size(0)
+        self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
         # print(f"client id: {self.client_id}, actual_batch_size: {actual_batch_size}")
         # Process each parameter layer independently with its own heuristic max_norm
         for param_name, per_sample_grad in per_sample_grads.items():
@@ -226,8 +227,8 @@ class DPScaffoldClient(DPFedAvgLocalClient):
                 print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
             if add_noise:
                 # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
-                sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
-                noise = torch.randn_like(mean_clipped_grad, device=self.device) * sigma_dp_layer
+                # sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
                 noisy_grad = mean_clipped_grad + noise
             else:
                 noisy_grad = mean_clipped_grad

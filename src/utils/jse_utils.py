@@ -191,7 +191,7 @@ class JSEProcessor:
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
         # print(f"[JSE] apply_global_jse_to_gradients: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
-        shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
+        # shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Step 3: Apply shrinkage to each gradient directly in-place
 
