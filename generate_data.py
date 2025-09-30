@@ -349,13 +349,13 @@ if __name__ == "__main__":
         "-d", "--dataset", type=str, choices=DATASETS.keys(), required=True
     )
     parser.add_argument("--iid", type=float, default=0.0)
-    parser.add_argument("-cn", "--client_num", type=int, default=20)
+    parser.add_argument("-cn", "--client_num", type=int, default=60)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "-sp", "--split", type=str, choices=["sample", "user"], default="sample"
     )
     parser.add_argument("-vr", "--val_ratio", type=float, default=0.0)
-    parser.add_argument("-tr", "--test_ratio", type=float, default=0.25)
+    parser.add_argument("-tr", "--test_ratio", type=float, default=0.2)
     parser.add_argument("-pd", "--plot_distribution", type=int, default=1)
 
     # Randomly assign classes

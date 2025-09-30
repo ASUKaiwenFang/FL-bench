@@ -1,6 +1,7 @@
 from typing import Any
 from copy import deepcopy
 import torch
+import numpy as np
 from collections import OrderedDict
 from src.client.dp_fedavg_local import DPFedAvgLocalClient, AlgorithmVariant
 from src.utils.dp_mechanisms import compute_per_sample_grads, compute_per_sample_norms
@@ -113,7 +114,131 @@ class DPScaffoldClient(DPFedAvgLocalClient):
             # Set the final gradient
             self._cached_model_params[param_name].grad = noisy_grad
 
+    def _compute_clipped_gradients_heuristic(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with heuristic median-based clipping and SCAFFOLD control variate correction.
 
+        This method uses a heuristic approach where each parameter layer computes its own
+        dynamic clipping threshold (max_norm) based on the median of per-sample gradient norms
+        for that layer. This allows adaptive clipping that responds to the actual gradient
+        distribution of each layer independently.
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        # Compute per-sample gradients using parent class method
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
+
+        if len(per_sample_grads) == 0:
+            return
+
+        # Get actual batch size
+        actual_batch_size = next(iter(per_sample_grads.values())).size(0)
+        # print(f"client id: {self.client_id}, actual_batch_size: {actual_batch_size}")
+        # Process each parameter layer independently with its own heuristic max_norm
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Compute per-sample gradient norms for this layer
+            # per_sample_grad shape: [batch_size, *param_shape]
+            per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
+
+            # Heuristic: use median of per-sample norms as max_norm for this layer
+            max_norm = float(np.median(per_sample_norms_layer.detach().cpu().numpy()))
+            # if self.client_id == 14:
+            #     print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}")
+            # Calculate per-sample clipping factors for this layer
+            per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
+
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+            if self.client_id == 14:
+                print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
+            if add_noise:
+                # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
+                sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * sigma_dp_layer
+                noisy_grad = mean_clipped_grad + noise
+            else:
+                noisy_grad = mean_clipped_grad
+
+            # Apply SCAFFOLD control variate correction
+            c_global = self.c_global[param_name]
+            c_local = self.c_local[param_name]
+            noisy_grad += (c_global - c_local).to(self.device)
+
+            # Set the final gradient
+            self._cached_model_params[param_name].grad = noisy_grad
+            
+    def _compute_clipped_gradients_per_layer(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with heuristic median-based clipping and SCAFFOLD control variate correction.
+
+        This method uses a heuristic approach where each parameter layer computes its own
+        dynamic clipping threshold (max_norm) based on the median of per-sample gradient norms
+        for that layer. This allows adaptive clipping that responds to the actual gradient
+        distribution of each layer independently.
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        # Compute per-sample gradients using parent class method
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
+
+        if len(per_sample_grads) == 0:
+            return
+
+        # Get actual batch size
+        actual_batch_size = next(iter(per_sample_grads.values())).size(0)
+        # print(f"client id: {self.client_id}, actual_batch_size: {actual_batch_size}")
+        # Process each parameter layer independently with its own heuristic max_norm
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Compute per-sample gradient norms for this layer
+            # per_sample_grad shape: [batch_size, *param_shape]
+            per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
+
+            # Heuristic: use median of per-sample norms as max_norm for this layer
+            max_norm = self.clip_norm
+            # if self.client_id == 14:
+            #     print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}")
+            # Calculate per-sample clipping factors for this layer
+            per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
+
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+            if self.client_id == 14:
+                print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
+            if add_noise:
+                # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
+                sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * sigma_dp_layer
+                noisy_grad = mean_clipped_grad + noise
+            else:
+                noisy_grad = mean_clipped_grad
+
+            # Apply SCAFFOLD control variate correction
+            c_global = self.c_global[param_name]
+            c_local = self.c_local[param_name]
+            noisy_grad += (c_global - c_local).to(self.device)
+
+            # Set the final gradient
+            self._cached_model_params[param_name].grad = noisy_grad
 
     def _step_noise_training(self):
         """Gradient-level noise addition with SCAFFOLD control variates.
@@ -129,17 +254,20 @@ class DPScaffoldClient(DPFedAvgLocalClient):
         self.dataset.train()
 
         for _ in range(self.local_epoch):
+
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
             # Use new torch.func based gradient computation with SCAFFOLD integration
-            self._compute_clipped_gradients(x, y, add_noise=True)
+            # self._compute_clipped_gradients_heuristic(x, y, add_noise=True)
+            # self._compute_clipped_gradients(x, y, add_noise=True)
+            self._compute_clipped_gradients_per_layer(x, y, add_noise=True)
             self.optimizer.step()
 
-            if self.lr_scheduler is not None:
+            if self.lr_scheduler is not None:   
                 self.lr_scheduler.step()
 
-        self._compute_param_diff_and_control_variates(add_noise=True)
+        self._compute_param_diff_and_control_variates(add_noise=False)
 
     def _last_noise_training(self):
         """Parameter-level noise addition with SCAFFOLD control variates.

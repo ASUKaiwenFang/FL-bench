@@ -23,8 +23,9 @@ common:
   seed: 42
   join_ratio: 0.2
   global_epoch: 100
-  local_epoch: 5
+  local_epoch: 50
   batch_size: 32
+  monitor: tensorboard
 
 # DP-ScaffStein specific parameters - Step Noise Step JSE Variant
 dp_scaffstein:
