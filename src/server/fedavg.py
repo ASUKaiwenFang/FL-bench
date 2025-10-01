@@ -543,6 +543,7 @@ class FedAvgServer:
         or personalized client models)."""
         self.testing = True
         clients = list(set(self.val_clients + self.test_clients))
+        # print(clients)
         template = {
             "before": {"train": Metrics(), "val": Metrics(), "test": Metrics()},
             "after": {"train": Metrics(), "val": Metrics(), "test": Metrics()},
@@ -798,6 +799,36 @@ class FedAvgServer:
                         new_style=True,
                     )
 
+            # log all_clients test results
+            if (
+                self.args.common.monitor == "tensorboard"
+                and self.current_epoch + 1 in self.test_results
+                and "all_clients" in self.test_results[self.current_epoch + 1]
+            ):
+                for stage in ["before", "after"]:
+                    for split_name, flag in [
+                        ("train", self.args.common.test.client.train),
+                        ("val", self.args.common.test.client.val),
+                        ("test", self.args.common.test.client.test),
+                    ]:
+                        if flag:
+                            metrics = self.test_results[self.current_epoch + 1]["all_clients"][stage][split_name]
+                            if metrics:
+                                # Track accuracy
+                                self.tensorboard.add_scalar(
+                                    f"Accuracy-{self.monitor_window_name_suffix}/{split_name}set-{stage}-AllClients",
+                                    metrics.accuracy,
+                                    self.current_epoch + 1,
+                                    new_style=True,
+                                )
+                                # Track loss
+                                self.tensorboard.add_scalar(
+                                    f"Loss-{self.monitor_window_name_suffix}/{split_name}set-{stage}-AllClients",
+                                    metrics.loss,
+                                    self.current_epoch + 1,
+                                    new_style=True,
+                                )
+
     def show_max_metrics(self):
         """Show the maximum stats that FL method get."""
         self.logger.log("=" * 20, self.algorithm_name, "Max Accuracy", "=" * 20)
@@ -885,6 +916,11 @@ class FedAvgServer:
         from matplotlib import pyplot as plt
 
         matplotlib.use("Agg")
+
+        # Create 1x2 subplot layout
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+        # Left plot: Aggregated client metrics (existing logic)
         linestyle = {
             "before": {"train": "dotted", "val": "dashed", "test": "solid"},
             "after": {"train": "dotted", "val": "dashed", "test": "solid"},
@@ -892,7 +928,7 @@ class FedAvgServer:
         for stage in ["before", "after"]:
             for split in ["train", "val", "test"]:
                 if len(self.aggregated_client_metrics[stage][split]) > 0:
-                    plt.plot(
+                    ax1.plot(
                         [
                             metrics.accuracy
                             for metrics in self.aggregated_client_metrics[stage][split]
@@ -901,12 +937,98 @@ class FedAvgServer:
                         ls=linestyle[stage][split],
                     )
 
-        plt.title(f"{self.algorithm_name}_{self.args.dataset.name}")
-        plt.ylim(0, 100)
-        plt.xlabel("Communication Rounds")
-        plt.ylabel("Accuracy")
-        plt.legend()
-        plt.savefig(self.output_dir / f"metrics.png", bbox_inches="tight")
+        ax1.set_title(f"{self.algorithm_name}_{self.args.dataset.name} - Aggregated Metrics")
+        ax1.set_ylim(0, 100)
+        ax1.set_xlabel("Communication Rounds")
+        ax1.set_ylabel("Accuracy (%)")
+        ax1.legend()
+
+        # Right plot: Test results for all_clients (accuracy + loss)
+        # Extract data from test_results
+        epochs_with_data = sorted([
+            epoch for epoch, results in self.test_results.items()
+            if "all_clients" in results
+        ])
+
+        if len(epochs_with_data) > 0:
+            # Create dual y-axis
+            ax2_twin = ax2.twinx()
+
+            # Color mapping - using more distinct colors
+            color_map = {"train": "blue", "val": "red", "test": "green"}
+
+            # Collect handles and labels for combined legend
+            handles = []
+            labels = []
+
+            for stage in ["before", "after"]:
+                for split in ["train", "val", "test"]:
+                    # Extract accuracy and loss data
+                    acc_data = []
+                    loss_data = []
+
+                    for epoch in epochs_with_data:
+                        metrics = self.test_results[epoch]["all_clients"][stage][split]
+                        if metrics:
+                            acc_data.append(metrics.accuracy)
+                            loss_data.append(metrics.loss)
+                        else:
+                            acc_data.append(None)
+                            loss_data.append(None)
+
+                    # Plot accuracy on left y-axis if data exists
+                    if any(x is not None for x in acc_data):
+                        line_acc = ax2.plot(
+                            epochs_with_data,
+                            acc_data,
+                            label=f"{split}set-{stage} (Acc)",
+                            ls="solid",
+                            color=color_map[split],
+                            linewidth=2,
+                        )
+                        handles.extend(line_acc)
+                        labels.append(f"{split}set-{stage} (Acc)")
+
+                    # Plot loss on right y-axis if data exists
+                    if any(x is not None for x in loss_data):
+                        line_loss = ax2_twin.plot(
+                            epochs_with_data,
+                            loss_data,
+                            label=f"{split}set-{stage} (Loss)",
+                            ls="solid",
+                            color=color_map[split],
+                            linewidth=2,
+                            alpha=0.7,
+                        )
+                        handles.extend(line_loss)
+                        labels.append(f"{split}set-{stage} (Loss)")
+
+            # Set labels and titles for right plot
+            ax2.set_title(f"{self.algorithm_name}_{self.args.dataset.name} - Test Results (All Clients)")
+            ax2.set_xlabel("Communication Rounds")
+            ax2.set_ylabel("Accuracy (%)", color="black")
+            ax2.set_ylim(0, 100)
+            ax2.tick_params(axis='y', labelcolor="black")
+
+            ax2_twin.set_ylabel("Loss", color="gray")
+            ax2_twin.tick_params(axis='y', labelcolor="gray")
+
+            # Combined legend
+            ax2.legend(handles, labels, loc="best")
+        else:
+            # No data available
+            ax2.text(
+                0.5, 0.5,
+                "No all_clients test data available",
+                ha="center", va="center",
+                transform=ax2.transAxes,
+                fontsize=12,
+            )
+            ax2.set_title(f"{self.algorithm_name}_{self.args.dataset.name} - Test Results (All Clients)")
+
+        plt.tight_layout()
+        plt.savefig(self.output_dir / f"metrics.png", bbox_inches="tight", dpi=100)
+        plt.close()
 
     def save_metrics_stats(self):
         """Save the metrics stats of FL-bench experiment."""

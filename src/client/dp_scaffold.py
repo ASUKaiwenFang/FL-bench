@@ -159,8 +159,8 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
             # Average clipped gradients across batch
             mean_clipped_grad = clipped_grad.mean(dim=0)
-            if self.client_id == 14:
-                print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
+            # if self.client_id == 14:
+            #     print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
             if add_noise:
                 # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
                 sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
@@ -223,8 +223,8 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
             # Average clipped gradients across batch
             mean_clipped_grad = clipped_grad.mean(dim=0)
-            if self.client_id == 14:
-                print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
+            # if self.client_id == 14:
+            #     print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
             if add_noise:
                 # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
                 # sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
