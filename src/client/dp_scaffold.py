@@ -260,9 +260,9 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
             self.optimizer.zero_grad()
             # Use new torch.func based gradient computation with SCAFFOLD integration
-            # self._compute_clipped_gradients_heuristic(x, y, add_noise=True)
+            self._compute_clipped_gradients_heuristic(x, y, add_noise=True)
             # self._compute_clipped_gradients(x, y, add_noise=True)
-            self._compute_clipped_gradients_per_layer(x, y, add_noise=True)
+            # self._compute_clipped_gradients_per_layer(x, y, add_noise=True)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:   

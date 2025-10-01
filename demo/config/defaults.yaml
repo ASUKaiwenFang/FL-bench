@@ -105,7 +105,7 @@ common:
     # For example, Set client.test as true to evaluate on local testsets from selected clients with client local models.
     # Frequency is set by `client.interval`. Negative value for disabling.
     client:
-      interval: 100
+      interval: 1
       finetune_epoch: 0 # Number of epochs for clients fine-tunning their models before testing.
       train: false
       val: false
