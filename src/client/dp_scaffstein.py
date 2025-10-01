@@ -95,9 +95,9 @@ class DPScaffSteinClient(DPScaffoldClient):
             add_noise: Whether to add Gaussian noise to gradients
         """
         # Use parent class gradient computation
-        # super()._compute_clipped_gradients(inputs, targets, add_noise)
+        self._compute_clipped_gradients(inputs, targets, add_noise)
         # self._compute_clipped_gradients_heuristic(inputs, targets, add_noise)
-        self._compute_clipped_gradients_per_layer(inputs, targets, add_noise)
+        # self._compute_clipped_gradients_per_layer(inputs, targets, add_noise)
 
         # Apply step-wise JSE to gradients
         if add_noise:
