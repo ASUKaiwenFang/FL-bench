@@ -96,6 +96,7 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
+        print(f"[JSE] apply_jse_shrinkage: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={tensor_norm_sq:.6f}, elements={d}")
         shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Apply shrinkage: result = shrinkage_multiplier * tensor
