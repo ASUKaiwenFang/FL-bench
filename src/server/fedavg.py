@@ -764,6 +764,12 @@ class FedAvgServer:
                             self.current_epoch,
                             new_style=True,
                         )
+                        self.tensorboard.add_scalar(
+                            f"Loss-{self.monitor_window_name_suffix}/{split}set-{stage}LocalTraining",
+                            aggregated.loss,
+                            self.current_epoch,
+                            new_style=True,
+                        )
 
             # log server side evaluation results
             if (
@@ -795,6 +801,14 @@ class FedAvgServer:
                         self.test_results[self.current_epoch + 1]["centralized"][
                             "after"
                         ][split].accuracy,
+                        self.current_epoch + 1,
+                        new_style=True,
+                    )
+                    self.tensorboard.add_scalar(
+                        f"Loss-{self.monitor_window_name_suffix}/{split}set-CentralizedEvaluation",
+                        self.test_results[self.current_epoch + 1]["centralized"][
+                            "after"
+                        ][split].loss,
                         self.current_epoch + 1,
                         new_style=True,
                     )
