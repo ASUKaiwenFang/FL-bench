@@ -51,7 +51,7 @@ class JSEProcessor:
         tensor: torch.Tensor,
         noise_variance: float,
         k_factor: int = 1
-    ) -> torch.Tensor:
+    ) -> tuple:
         """
         Apply James-Stein shrinkage to a tensor with enhanced numerical stability.
 
@@ -65,7 +65,7 @@ class JSEProcessor:
             k_factor: Accumulation factor for multi-step scenarios (default: 1)
 
         Returns:
-            Tensor after applying James-Stein shrinkage
+            Tuple of (shrinked_tensor, shrinkage_multiplier_value)
         """
         # Input validation
         JSEProcessor._validate_noise_variance(noise_variance)
@@ -73,11 +73,11 @@ class JSEProcessor:
 
         # Handle empty tensors
         if tensor.numel() == 0:
-            return tensor
+            return tensor, 1.0
 
         # Check if JSE is applicable
         if not JSEProcessor._check_tensor_applicability(tensor):
-            return tensor
+            return tensor, 1.0
 
         # Compute tensor norm squared using stable method
         tensor_norm_sq = torch.sum(tensor ** 2)
@@ -93,7 +93,7 @@ class JSEProcessor:
 
         # Numerical stability check
         if not JSEProcessor._is_numerically_stable(tensor_norm_sq):
-            return tensor
+            return tensor, 1.0
 
         # Calculate shrinkage factor with numerical stability
         d = tensor.numel()
@@ -114,7 +114,7 @@ class JSEProcessor:
         shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Apply shrinkage: result = shrinkage_multiplier * tensor
-        return shrinkage_multiplier * tensor
+        return shrinkage_multiplier * tensor, shrinkage_multiplier.item()
 
     @staticmethod
     def apply_layerwise_jse_to_gradients(
@@ -146,7 +146,7 @@ class JSEProcessor:
     def apply_global_jse_to_gradients(
         model_parameters: List[torch.nn.Parameter],
         noise_variance: float
-    ) -> None:
+    ) -> float:
         """
         Apply global JSE to model parameter gradients in-place.
 
@@ -160,6 +160,9 @@ class JSEProcessor:
         Args:
             model_parameters: List of model parameters with gradients
             noise_variance: Noise variance σ² from DP mechanism
+
+        Returns:
+            shrinkage_multiplier value (float)
         """
         # Input validation
         JSEProcessor._validate_noise_variance(noise_variance)
@@ -172,7 +175,7 @@ class JSEProcessor:
                 break
 
         if device is None:
-            return  # No valid gradients found
+            return 1.0  # No valid gradients found
 
         # Step 1: Compute global statistics directly without intermediate structures
         total_norm_sq = torch.tensor(0.0, device=device)
@@ -187,14 +190,14 @@ class JSEProcessor:
 
         # Handle edge cases
         if total_elements == 0:
-            return
+            return 1.0
         if total_elements <= 2:
             # JSE is not applicable for d <= 2, return without modification
-            return
+            return 1.0
 
         # Numerical stability check
         if not JSEProcessor._is_numerically_stable(total_norm_sq):
-            return
+            return 1.0
 
         # Step 2: Calculate global shrinkage factor with numerical stability
         shrinkage_numerator = (total_elements - 2) * noise_variance
@@ -212,6 +215,8 @@ class JSEProcessor:
 
         for param in grad_params:
             param.grad.data *= shrinkage_multiplier
+
+        return shrinkage_multiplier.item()
 
     @staticmethod
     def apply_layerwise_jse_to_parameter_diff(
@@ -242,7 +247,7 @@ class JSEProcessor:
         param_diff_dict: Dict[str, torch.Tensor],
         noise_variance: float,
         k_factor: int = 1
-    ) -> None:
+    ) -> float:
         """
         Apply global JSE to parameter differences in-place.
 
@@ -257,6 +262,9 @@ class JSEProcessor:
             param_diff_dict: Dictionary of parameter difference tensors (modified in-place)
             noise_variance: Noise variance σ² from DP mechanism
             k_factor: Accumulation factor for multi-step scenarios (default: 1)
+
+        Returns:
+            shrinkage_multiplier value (float)
         """
         # Input validation
         JSEProcessor._validate_noise_variance(noise_variance)
@@ -270,7 +278,7 @@ class JSEProcessor:
                 break
 
         if device is None:
-            return  # No valid tensors found
+            return 1.0  # No valid tensors found
 
         # Step 1: Compute global statistics without concatenation
         total_norm_sq = torch.tensor(0.0, device=device)
@@ -284,14 +292,14 @@ class JSEProcessor:
 
         # Handle edge cases
         if total_elements == 0:
-            return
+            return 1.0
         if total_elements <= 2:
             # JSE is not applicable for d <= 2, return without modification
-            return
+            return 1.0
 
         # Numerical stability check
         if not JSEProcessor._is_numerically_stable(total_norm_sq):
-            return
+            return 1.0
 
         # Step 2: Calculate global shrinkage factor with numerical stability
         shrinkage_numerator = (total_elements - 2) * k_factor * noise_variance
@@ -311,6 +319,8 @@ class JSEProcessor:
             if tensor.numel() > 0:
                 # Apply shrinkage: result = (1 - shrinkage_factor) * tensor
                 param_diff_dict[key] = tensor * shrinkage_multiplier
+
+        return shrinkage_multiplier.item()
 
 
 

@@ -57,18 +57,29 @@ class DPScaffSteinServer(DPScaffoldServer):
         # Store sigma for server-side JSE processing
         self.sigma = getattr(self.args.dp_scaffstein, 'sigma', 1.0)
 
+        # Initialize shrinkage history tracking
+        self.shrinkage_history = {}
+        self.current_epoch = 0
+
     def aggregate_client_updates(self, client_packages: List[Dict[str, Any]]) -> None:
         """Aggregate client updates with DP-ScaffStein processing.
 
         For variant 1 (last_noise_server_jse): Apply server-side JSE to aggregated parameter differences
         For variants 2 and 3: Use standard SCAFFOLD aggregation (JSE handled at client)
         """
+        # Collect client shrinkage factors for variant 2 and 3 before aggregation
+        if self.algorithm_variant in [2, 3]:  # step_noise_step_jse or step_noise_final_jse
+            self._record_client_shrinkage_factors(client_packages)
+
         # First, perform standard SCAFFOLD aggregation
         super().aggregate_client_updates(client_packages)
 
         # Apply server-side JSE for variant 1 only
         if self.algorithm_variant == 1:  # last_noise_server_jse
             self._apply_server_jse(client_packages)
+
+        # Increment epoch counter
+        self.current_epoch += 1
 
     def _apply_server_jse(self, client_packages) -> None:
         """Apply server-side JSE to aggregated parameter differences.
@@ -95,9 +106,66 @@ class DPScaffSteinServer(DPScaffoldServer):
 
         # Apply global JSE to the aggregated public model parameters
         # Note: For server-side JSE, we apply JSE to the aggregated parameters directly
-        JSEProcessor.apply_global_jse_to_parameter_diff(
+        shrinkage_factor = JSEProcessor.apply_global_jse_to_parameter_diff(
             self.public_model_params, sigma_dp_squared, k_factor=1  # k_factor=1 for server-side JSE
         )
+
+        # Record shrinkage factor for variant 1
+        self.shrinkage_history[self.current_epoch] = {"server": shrinkage_factor}
+
+    def _record_client_shrinkage_factors(self, client_packages: Dict[int, Dict[str, Any]]) -> None:
+        """Record shrinkage factors from client packages.
+
+        Extracts shrinkage factors from each client and stores them for the current epoch.
+
+        Args:
+            client_packages: Dictionary mapping client_id to client package data
+        """
+        current_epoch_data = {}
+
+        for client_id, package in client_packages.items():
+            if "shrinkage_factor" in package:
+                current_epoch_data[f"client_{client_id}"] = package["shrinkage_factor"]
+
+        if current_epoch_data:
+            self.shrinkage_history[self.current_epoch] = current_epoch_data
+
+    def save_shrinkage_factors(self) -> None:
+        """Save shrinkage factors to JSON file in output directory."""
+        import json
+        from pathlib import Path
+
+        if not self.shrinkage_history:
+            return  # Nothing to save
+
+        # Determine algorithm variant name
+        variant_names = {
+            1: "last_noise_server_jse",
+            2: "step_noise_step_jse",
+            3: "step_noise_final_jse"
+        }
+        variant_name = variant_names.get(self.algorithm_variant, "unknown")
+
+        # Prepare data structure
+        data = {
+            "algorithm_variant": variant_name,
+            "data": {str(k): v for k, v in self.shrinkage_history.items()}
+        }
+
+        # Save to JSON file
+        output_path = Path(self.output_dir) / "shrinkage_factors.json"
+        with open(output_path, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        print(f"Shrinkage factors saved to: {output_path}")
+
+    def run_experiment(self):
+        """Override parent method to save shrinkage factors after training."""
+        # Call parent run_experiment
+        super().run_experiment()
+
+        # Save shrinkage factors after training completes
+        self.save_shrinkage_factors()
 
     @staticmethod
     def get_hyperparams(args_list=None) -> Namespace:

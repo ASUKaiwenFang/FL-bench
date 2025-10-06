@@ -57,6 +57,11 @@ class DPScaffSteinClient(DPScaffoldClient):
             if hasattr(original_args, 'dp_scaffstein') and hasattr(original_args.dp_scaffstein, 'data_sample_ratio'):
                 self.data_sample_ratio = original_args.dp_scaffstein.data_sample_ratio
 
+        # Initialize shrinkage factor tracking
+        self.shrinkage_factors = []
+        self.last_local_epoch_shrinkage = None
+        self.client_shrinkage_factor = None
+
     def fit(self):
         """Train the model with DP-ScaffStein algorithm.
 
@@ -101,12 +106,14 @@ class DPScaffSteinClient(DPScaffoldClient):
 
         # Apply step-wise JSE to gradients
         if add_noise:
-            JSEProcessor.apply_global_jse_to_gradients(
+            shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
                 list(self.model.parameters()), self.sigma_dp**2
             )
             # JSEProcessor.apply_layerwise_jse_to_gradients(
             #     list(self.model.parameters()), self.sigma_dp**2
             # )
+            # Store shrinkage factor
+            self.shrinkage_factors.append(shrinkage_factor)
 
     def _fit_variant_2_step_noise_step_jse(self):
         """Algorithm Variant 2: Step-wise DP training with per-step JSE.
@@ -117,8 +124,11 @@ class DPScaffSteinClient(DPScaffoldClient):
         self.model.train()
         self.dataset.train()
 
+        # Clear shrinkage factors for new round
+        self.shrinkage_factors = []
+
         # Local training loop with per-step DP processing and JSE
-        for _ in range(self.local_epoch):
+        for epoch_idx in range(self.local_epoch):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
@@ -128,6 +138,10 @@ class DPScaffSteinClient(DPScaffoldClient):
 
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
+
+            # Record shrinkage factor from last local epoch
+            if epoch_idx == self.local_epoch - 1 and len(self.shrinkage_factors) > 0:
+                self.last_local_epoch_shrinkage = self.shrinkage_factors[-1]
 
         self._compute_param_diff_and_control_variates(add_noise=False)
 
@@ -147,9 +161,12 @@ class DPScaffSteinClient(DPScaffoldClient):
 
         # Apply global JSE to final parameter differences with K factor
         # Following Algorithm 3: shrinkage = (d-2)K·σ²_DP / ||A||², where K = local_epoch
-        JSEProcessor.apply_global_jse_to_parameter_diff(
+        shrinkage_factor = JSEProcessor.apply_global_jse_to_parameter_diff(
             self.model_params_diff, self.sigma_dp**2, k_factor=self.local_epoch
         )
+
+        # Store shrinkage factor
+        self.client_shrinkage_factor = shrinkage_factor
 
 
 
@@ -160,5 +177,13 @@ class DPScaffSteinClient(DPScaffoldClient):
         # Add sigma_dp for server-side JSE processing (variant 1)
         if hasattr(self, 'sigma_dp'):
             client_package["sigma_dp"] = self.sigma_dp
+
+        # Add shrinkage factor for variant 2 and 3
+        if self.scaffstein_algorithm_variant == ScaffSteinAlgorithmVariant.STEP_NOISE_STEP_JSE:
+            # Variant 2: send last local epoch shrinkage
+            client_package["shrinkage_factor"] = self.last_local_epoch_shrinkage if self.last_local_epoch_shrinkage is not None else 1.0
+        elif self.scaffstein_algorithm_variant == ScaffSteinAlgorithmVariant.STEP_NOISE_FINAL_JSE:
+            # Variant 3: send client shrinkage factor
+            client_package["shrinkage_factor"] = self.client_shrinkage_factor if self.client_shrinkage_factor is not None else 1.0
 
         return client_package
