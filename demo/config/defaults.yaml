@@ -115,10 +115,10 @@ common:
     # Frequency is set by `server.interval`. Negative value for disabling.
     # NOTE: If clients have personalized model parameters like local buffers or classifiers, centralized evaluation for the global model is disabled.
     server:
-      interval: -1
-      train: false
+      interval: 1
+      train: true
       val: false
-      test: false
+      test: true
       # Whether to evaluate the global model in train mode or eval mode.
       # Evaluating in train mode allows to get better batchnorm statistics, but is dependent on the order of the data.
       model_in_train_mode: false
