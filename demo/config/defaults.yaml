@@ -107,7 +107,7 @@ common:
     client:
       interval: 1
       finetune_epoch: 0 # Number of epochs for clients fine-tunning their models before testing.
-      train: false
+      train: true
       val: false
       test: true
     # For example, set server.test as true to evaluate on a centralized testset (created by aggregating all clients' local testsets)

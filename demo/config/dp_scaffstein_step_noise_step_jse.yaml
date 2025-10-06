@@ -33,7 +33,7 @@ dp_scaffstein:
   clip_norm: 1.0                            # Gradient clipping threshold
   sigma: 30                                  # Noise standard deviation parameter
   data_sample_ratio: 0.2                    # Data sampling ratio (0.2 = 20% of trainset)
-  global_lr: 1.0                            # SCAFFOLD global learning rate
+  global_lr: 2.0                            # SCAFFOLD global learning rate
 
 # Optimizer settings
 optimizer:

@@ -19,7 +19,7 @@ dataset:
 
 # Model settings
 model:
-  name: nn1
+  name: 2nn
 
 # Training settings
 common:
@@ -33,7 +33,7 @@ common:
 # DP-SCAFFOLD specific parameters - Step Noise Variant
 dp_scaffold:
   algorithm_variant: "step_noise"  # Gradient-level noise addition
-  clip_norm: 100.0                   # Gradient clipping threshold
+  clip_norm: 1.0                   # Gradient clipping threshold
   sigma: 30                        # Noise standard deviation parameter
   data_sample_ratio: 0.2           # Data sampling ratio (0.2 = 20% of trainset)
   global_lr: 1.0                   # SCAFFOLD global learning rate
@@ -41,4 +41,4 @@ dp_scaffold:
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.0005
+  lr: 0.001

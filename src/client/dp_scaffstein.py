@@ -101,12 +101,12 @@ class DPScaffSteinClient(DPScaffoldClient):
 
         # Apply step-wise JSE to gradients
         if add_noise:
-            # JSEProcessor.apply_global_jse_to_gradients(
-            #     list(self.model.parameters()), self.sigma_dp**2
-            # )
-            JSEProcessor.apply_layerwise_jse_to_gradients(
+            JSEProcessor.apply_global_jse_to_gradients(
                 list(self.model.parameters()), self.sigma_dp**2
             )
+            # JSEProcessor.apply_layerwise_jse_to_gradients(
+            #     list(self.model.parameters()), self.sigma_dp**2
+            # )
 
     def _fit_variant_2_step_noise_step_jse(self):
         """Algorithm Variant 2: Step-wise DP training with per-step JSE.

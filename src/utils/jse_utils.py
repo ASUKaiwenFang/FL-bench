@@ -82,6 +82,15 @@ class JSEProcessor:
         # Compute tensor norm squared using stable method
         tensor_norm_sq = torch.sum(tensor ** 2)
 
+        # Count zero elements and compute statistics
+        num_zeros = torch.sum(tensor == 0).item()
+        total_elements = tensor.numel()
+        zero_ratio = num_zeros / total_elements if total_elements > 0 else 0
+        tensor_mean = torch.mean(tensor).item()
+        tensor_std = torch.std(tensor).item()
+        tensor_min = torch.min(tensor).item()
+        tensor_max = torch.max(tensor).item()
+
         # Numerical stability check
         if not JSEProcessor._is_numerically_stable(tensor_norm_sq):
             return tensor
@@ -96,7 +105,12 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        print(f"[JSE] apply_jse_shrinkage: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={tensor_norm_sq:.6f}, elements={d}")
+        # print(f"[JSE] apply_jse_shrinkage: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={tensor_norm_sq:.6f}, elements={d}, zeros={num_zeros}/{total_elements} ({zero_ratio:.2%}), mean={tensor_mean:.6f}, std={tensor_std:.6f}, min={tensor_min:.6f}, max={tensor_max:.6f}, add_noise={noise_variance:.6f}")
+
+        # Print all data for small tensors (e.g., bias with 10 elements)
+        if d == 10:
+            print(f"[JSE] Tensor data (10 elements): {tensor.flatten().tolist()}")
+
         shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Apply shrinkage: result = shrinkage_multiplier * tensor
