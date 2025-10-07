@@ -4,6 +4,7 @@ import torch
 from collections import OrderedDict
 from src.client.dp_scaffold import DPScaffoldClient
 from src.utils.jse_utils import JSEProcessor
+from src.utils.dp_mechanisms import compute_per_sample_grads, compute_per_sample_norms
 
 
 class ScaffSteinAlgorithmVariant(Enum):
@@ -91,29 +92,70 @@ class DPScaffSteinClient(DPScaffoldClient):
     def _compute_clipped_gradients_with_step_jse(self, inputs, targets, add_noise=True):
         """Compute clipped per-sample gradients with step-wise JSE application.
 
-        This method extends the parent class gradient computation by adding
-        step-wise JSE processing after gradient computation.
+        This method implements the complete gradient computation flow with custom order:
+        1. Compute per-sample gradients and clip
+        2. Average clipped gradients
+        3. Add noise
+        4. Apply global JSE
+        5. Add SCAFFOLD control variate
 
         Args:
             inputs: Input batch tensor [batch_size, ...]
             targets: Target batch tensor [batch_size, ...]
             add_noise: Whether to add Gaussian noise to gradients
         """
-        # Use parent class gradient computation
-        self._compute_clipped_gradients(inputs, targets, add_noise)
-        # self._compute_clipped_gradients_heuristic(inputs, targets, add_noise)
-        # self._compute_clipped_gradients_per_layer(inputs, targets, add_noise)
+        # Compute per-sample gradients using parent class method
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
 
-        # Apply step-wise JSE to gradients
-        # if add_noise:
-        #     shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
-        #         list(self.model.parameters()), self.sigma_dp**2
-        #     )
-        #     # JSEProcessor.apply_layerwise_jse_to_gradients(
-        #     #     list(self.model.parameters()), self.sigma_dp**2
-        #     # )
-        #     # Store shrinkage factor
-        #     self.shrinkage_factors.append(shrinkage_factor)
+        # Compute per-sample gradient norms
+        per_sample_norms = compute_per_sample_norms(per_sample_grads)
+
+        if len(per_sample_norms) == 0:
+            return
+
+        # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
+        actual_batch_size = per_sample_norms.size(0)
+        self.sigma_dp = self.clip_norm * self.sigma / actual_batch_size
+
+        # Calculate per-sample clipping factors
+        per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
+
+        # Process gradients: clip → mean → add_noise (without SCAFFOLD correction yet)
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+
+            if add_noise:
+                # Add Gaussian noise to averaged gradient
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
+                noisy_grad = mean_clipped_grad + noise
+            else:
+                noisy_grad = mean_clipped_grad
+
+            # Set the gradient (without control variate yet)
+            self._cached_model_params[param_name].grad = noisy_grad
+
+        # Apply global JSE to gradients
+        if add_noise:
+            shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
+                list(self.model.parameters()), self.sigma_dp**2
+            )
+            # Store shrinkage factor
+            self.shrinkage_factors.append(shrinkage_factor)
+
+        # Add SCAFFOLD control variate correction after JSE
+        for param_name in per_sample_grads.keys():
+            c_global = self.c_global[param_name]
+            c_local = self.c_local[param_name]
+            self._cached_model_params[param_name].grad += (c_global - c_local).to(self.device)
 
     def _fit_variant_2_step_noise_step_jse(self):
         """Algorithm Variant 2: Step-wise DP training with per-step JSE.
