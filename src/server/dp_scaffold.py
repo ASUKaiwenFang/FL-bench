@@ -100,7 +100,6 @@ class DPScaffoldServer(DPFedAvgLocalServer):
             diffs = torch.stack([diff[name] for diff in model_params_diffs], dim=-1)
             aggregated = torch.sum(diffs * weights, dim=-1)
             self.public_model_params[name].data += self._get_global_lr() * aggregated
-
             # SCAFFOLD control variate update (unweighted)
             c_delta_tensor = torch.stack([c_delta[name] for c_delta in c_deltas], dim=-1)
             self.c_global[name].data += c_delta_tensor.sum(dim=-1) / self.client_num

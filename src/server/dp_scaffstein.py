@@ -60,6 +60,20 @@ class DPScaffSteinServer(DPScaffoldServer):
         # Initialize shrinkage history tracking
         self.shrinkage_history = {}
 
+        # Setup tensorboard custom layout for shrinkage factors
+        if self.args.common.monitor == "tensorboard":
+            layout = {
+                "JSE Shrinkage Factors": {
+                    "Statistics": ["Multiline", [
+                        "ShrinkageFactor/Client-Min",
+                        "ShrinkageFactor/Client-Max",
+                        "ShrinkageFactor/Client-Average"
+                    ]],
+                    "Server": ["Multiline", ["ShrinkageFactor/Server"]]
+                }
+            }
+            self.tensorboard.add_custom_scalars(layout)
+
     def aggregate_client_updates(self, client_packages: List[Dict[str, Any]]) -> None:
         """Aggregate client updates with DP-ScaffStein processing.
 
@@ -76,6 +90,9 @@ class DPScaffSteinServer(DPScaffoldServer):
         # Apply server-side JSE for variant 1 only
         if self.algorithm_variant == 1:  # last_noise_server_jse
             self._apply_server_jse(client_packages)
+
+        # Log shrinkage factors to tensorboard
+        self._log_shrinkage_to_tensorboard(client_packages)
 
     def _apply_server_jse(self, client_packages) -> None:
         """Apply server-side JSE to aggregated parameter differences.
@@ -125,6 +142,61 @@ class DPScaffSteinServer(DPScaffoldServer):
 
         if current_epoch_data:
             self.shrinkage_history[self.current_epoch] = current_epoch_data
+
+    def _log_shrinkage_to_tensorboard(self, client_packages: Dict[int, Dict[str, Any]]) -> None:
+        """Log JSE shrinkage factors to tensorboard.
+
+        For Algorithm 1: Logs server shrinkage factor
+        For Algorithm 2/3: Logs client statistics (min, max, average)
+
+        Args:
+            client_packages: Dictionary mapping client_id to client package data
+        """
+        if self.args.common.monitor != "tensorboard":
+            return
+
+        if self.algorithm_variant == 1:  # Algorithm 1: last_noise_server_jse
+            # Log server shrinkage factor
+            if self.current_epoch in self.shrinkage_history:
+                shrinkage = self.shrinkage_history[self.current_epoch].get("server", None)
+                if shrinkage is not None:
+                    self.tensorboard.add_scalar(
+                        "ShrinkageFactor/Server",
+                        shrinkage,
+                        self.current_epoch,
+                        new_style=True
+                    )
+
+        elif self.algorithm_variant in [2, 3]:  # Algorithm 2/3
+            # Extract shrinkage factors from client packages
+            shrinkage_factors = [
+                pkg["shrinkage_factor"]
+                for pkg in client_packages.values()
+                if "shrinkage_factor" in pkg
+            ]
+
+            if shrinkage_factors:
+                import numpy as np
+
+                # Log statistics
+                self.tensorboard.add_scalar(
+                    "ShrinkageFactor/Client-Min",
+                    float(np.min(shrinkage_factors)),
+                    self.current_epoch,
+                    new_style=True
+                )
+                self.tensorboard.add_scalar(
+                    "ShrinkageFactor/Client-Max",
+                    float(np.max(shrinkage_factors)),
+                    self.current_epoch,
+                    new_style=True
+                )
+                self.tensorboard.add_scalar(
+                    "ShrinkageFactor/Client-Average",
+                    float(np.mean(shrinkage_factors)),
+                    self.current_epoch,
+                    new_style=True
+                )
 
     def save_shrinkage_factors(self) -> None:
         """Save shrinkage factors to JSON file in output directory."""
