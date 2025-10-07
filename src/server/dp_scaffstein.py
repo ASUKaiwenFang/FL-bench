@@ -59,7 +59,6 @@ class DPScaffSteinServer(DPScaffoldServer):
 
         # Initialize shrinkage history tracking
         self.shrinkage_history = {}
-        self.current_epoch = 0
 
     def aggregate_client_updates(self, client_packages: List[Dict[str, Any]]) -> None:
         """Aggregate client updates with DP-ScaffStein processing.
@@ -77,9 +76,6 @@ class DPScaffSteinServer(DPScaffoldServer):
         # Apply server-side JSE for variant 1 only
         if self.algorithm_variant == 1:  # last_noise_server_jse
             self._apply_server_jse(client_packages)
-
-        # Increment epoch counter
-        self.current_epoch += 1
 
     def _apply_server_jse(self, client_packages) -> None:
         """Apply server-side JSE to aggregated parameter differences.
