@@ -210,8 +210,8 @@ class DPFedAvgLocalClient(FedAvgClient):
         # σ_DP = C * K * η_l * σ_g / b_actual
         # Note: For last_noise variant, we use configured batch_size as this represents
         # the expected batch size used throughout training
-        self.sigma_dp = (self.clip_norm * self.sigma / self.args.common.batch_size) * self.local_epoch * self.args.optimizer.lr 
-
+        self.sigma_dp = (2 * self.clip_norm * self.sigma / self.args.common.batch_size) * self.local_epoch * self.args.optimizer.lr 
+        print(f"client id: {self.client_id}, sigma_dp: {self.sigma_dp}, clip_norm: {self.clip_norm}, sigma: {self.sigma}, batch_size: {self.args.common.batch_size}, local_epoch: {self.local_epoch}, lr: {self.args.optimizer.lr}")
         # Calculate noisy parameter differences and store them
 
         for name, param in self.model.named_parameters():
@@ -253,8 +253,8 @@ class DPFedAvgLocalClient(FedAvgClient):
 
         # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
         actual_batch_size = per_sample_norms.size(0)
-        self.sigma_dp = self.clip_norm * self.sigma / actual_batch_size
-
+        self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
+        # print(f"client id: {self.client_id}, sigma_dp: {self.sigma_dp}, clip_norm: {self.clip_norm}, sigma: {self.sigma}, batch_size: {self.args.common.batch_size}")
         # Calculate per-sample clipping factors
         per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
 
