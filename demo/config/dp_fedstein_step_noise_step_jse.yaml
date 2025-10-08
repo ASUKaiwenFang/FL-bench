@@ -22,17 +22,18 @@ common:
   seed: 42
   join_ratio: 0.2
   global_epoch: 100
-  local_epoch: 5
+  local_epoch: 50
   batch_size: 32
   monitor: tensorboard
 
 # DP-FedStein specific parameters - Step Noise Step JSE Variant
 dp_fed_stein:
   algorithm_variant: "step_noise_step_jse"  # Gradient-level noise + per-step JSE
+  clip_method: "global"            # Clipping method: global, heuristic, per_layer
   clip_norm: 1.0                            # Gradient clipping threshold
   sigma: 30.0                                  # Noise standard deviation parameter
   data_sample_ratio: 0.2                    # Data sampling ratio (0.2 = 20% of trainset)
 
 optimizer:
   name: sgd # [sgd, adam, adamw, rmsprop, adagrad]
-  lr: 0.5
+  lr: 0.001

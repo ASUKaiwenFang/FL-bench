@@ -29,8 +29,9 @@ common:
 # DP-FedAvg specific parameters - Last Noise Variant
 dp_fedavg_local:
   algorithm_variant: "last_noise"  # Parameter-level noise addition
+  clip_method: "global"            # Clipping method: global, heuristic, per_layer
   clip_norm: 1.0                   # Gradient clipping threshold
-  sigma: 3.0                         # Noise standard deviation parameter
+  sigma: 30.0                      # Noise standard deviation parameter
   data_sample_ratio: 0.2           # Data sampling ratio (0.2 = 20% of trainset)
 
 optimizer:

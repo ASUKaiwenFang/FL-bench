@@ -228,6 +228,29 @@ class DPScaffoldClient(DPFedAvgLocalClient):
             # Set the final gradient
             self._cached_model_params[param_name].grad = noisy_grad
 
+    def _compute_clipped_gradients_dispatch(self, inputs, targets, add_noise=True):
+        """Dispatch to appropriate gradient clipping method with SCAFFOLD control variates.
+
+        This method overrides the parent class to ensure SCAFFOLD control variates
+        are applied regardless of which clipping method is used.
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        if self.clip_method == 'global':
+            return self._compute_clipped_gradients(inputs, targets, add_noise)
+        elif self.clip_method == 'heuristic':
+            return self._compute_clipped_gradients_heuristic(inputs, targets, add_noise)
+        elif self.clip_method == 'per_layer':
+            return self._compute_clipped_gradients_per_layer(inputs, targets, add_noise)
+        else:
+            raise ValueError(
+                f"Unknown clip_method: {self.clip_method}. "
+                f"Valid options are: 'global', 'heuristic', 'per_layer'"
+            )
+
     def _step_noise_training(self):
         """Gradient-level noise addition with SCAFFOLD control variates.
 
@@ -246,10 +269,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
-            # Use new torch.func based gradient computation with SCAFFOLD integration
-            # self._compute_clipped_gradients_heuristic(x, y, add_noise=True)
-            self._compute_clipped_gradients(x, y, add_noise=True)
-            # self._compute_clipped_gradients_per_layer(x, y, add_noise=True)
+            self._compute_clipped_gradients_dispatch(x, y, add_noise=True)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:   
@@ -271,8 +291,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
-            # Use new torch.func based gradient computation with SCAFFOLD integration (no noise)
-            self._compute_clipped_gradients(x, y, add_noise=False)
+            self._compute_clipped_gradients_dispatch(x, y, add_noise=False)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:

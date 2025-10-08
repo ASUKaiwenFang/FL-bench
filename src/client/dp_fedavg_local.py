@@ -77,7 +77,8 @@ class DPFedAvgLocalClient(FedAvgClient):
         defaults = {
             'clip_norm': 1.0,
             'sigma': 0.1,
-            'algorithm_variant': 'step_noise'
+            'algorithm_variant': 'step_noise',
+            'clip_method': 'global'
         }
 
         if key in defaults:
@@ -96,6 +97,7 @@ class DPFedAvgLocalClient(FedAvgClient):
         self.clip_norm = self._get_dp_config_value('clip_norm', 1.0)
         self.sigma = self._get_dp_config_value('sigma', 0.1)
         self.data_sample_ratio = self._get_dp_config_value('data_sample_ratio', None)
+        self.clip_method = self._get_dp_config_value('clip_method', 'global')
         self.sigma_dp = None
         self.model_params_diff = None
 
@@ -158,9 +160,7 @@ class DPFedAvgLocalClient(FedAvgClient):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
-            self._compute_clipped_gradients(x, y, add_noise=True)
-            # self._compute_clipped_gradients_heuristic(x, y, add_noise=True)
-            # self._compute_clipped_gradients_per_layer(x, y, add_noise=True)
+            self._compute_clipped_gradients_dispatch(x, y, add_noise=True)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
@@ -180,12 +180,10 @@ class DPFedAvgLocalClient(FedAvgClient):
 
         # Standard training without noise
         for _ in range(self.local_epoch):
-            
+
             x, y = self.get_data_batch()
             self.optimizer.zero_grad()
-            self._compute_clipped_gradients(x, y, add_noise=False)
-            # self._compute_clipped_gradients_heuristic(x, y, add_noise=False)
-            # self._compute_clipped_gradients_per_layer(x, y, add_noise=False)
+            self._compute_clipped_gradients_dispatch(x, y, add_noise=False)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
@@ -374,6 +372,30 @@ class DPFedAvgLocalClient(FedAvgClient):
             # Set the final gradient
             self._cached_model_params[param_name].grad = noisy_grad
 
+    def _compute_clipped_gradients_dispatch(self, inputs, targets, add_noise=True):
+        """Dispatch to appropriate gradient clipping method based on clip_method.
+
+        This method routes to the appropriate clipping strategy:
+        - 'global': Global clipping with fixed clip_norm
+        - 'heuristic': Adaptive per-layer clipping using median
+        - 'per_layer': Per-layer clipping with fixed clip_norm
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        if self.clip_method == 'global':
+            return self._compute_clipped_gradients(inputs, targets, add_noise)
+        elif self.clip_method == 'heuristic':
+            return self._compute_clipped_gradients_heuristic(inputs, targets, add_noise)
+        elif self.clip_method == 'per_layer':
+            return self._compute_clipped_gradients_per_layer(inputs, targets, add_noise)
+        else:
+            raise ValueError(
+                f"Unknown clip_method: {self.clip_method}. "
+                f"Valid options are: 'global', 'heuristic', 'per_layer'"
+            )
 
     def package(self):
         """Package client data including DP parameters.

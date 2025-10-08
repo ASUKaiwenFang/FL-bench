@@ -25,25 +25,19 @@ common:
   global_epoch: 100
   local_epoch: 50
   batch_size: 32
-  test:
-    server:
-      interval: 1
-      train: false
-      val: false
-      test: true
-      # Whether to evaluate the global model in train mode or eval mode.
-      # Evaluating in train mode allows to get better batchnorm statistics, but is dependent on the order of the data.
-      model_in_train_mode: false
+  monitor: tensorboard
+
 
 # DP-SCAFFOLD specific parameters - Last Noise Variant
 dp_scaffold:
   algorithm_variant: "last_noise"  # Parameter-level noise addition
+  clip_method: "global"            # Clipping method: global, heuristic, per_layer
   clip_norm: 1.0                   # Gradient clipping threshold
-  sigma: 30                         # Noise standard deviation parameter
+  sigma: 30                        # Noise standard deviation parameter
   data_sample_ratio: 0.2           # Data sampling ratio (0.2 = 20% of trainset)
   global_lr: 1.0                   # SCAFFOLD global learning rate
 
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.01
+  lr: 0.001
