@@ -27,7 +27,7 @@ def fix_random_seed(seed: int, use_cuda=False) -> None:
     np.random.seed(seed)
     torch.random.manual_seed(seed)
     if torch.cuda.is_available() and use_cuda:
-        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 

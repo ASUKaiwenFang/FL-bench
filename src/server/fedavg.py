@@ -527,6 +527,7 @@ class FedAvgServer:
             optimizer_state=self.client_optimizer_states[client_id],
             lr_scheduler_state=self.client_lr_scheduler_states[client_id],
             return_diff=self.return_diff,
+            current_epoch=self.current_epoch,
         )
 
     def test_client_models(self):
@@ -674,6 +675,9 @@ class FedAvgServer:
 
             About the content of client parameter package, check `FedAvgClient.package()`.
         """
+        # Sort client packages by client_id for deterministic aggregation order
+        client_packages = OrderedDict(sorted(client_packages.items()))
+
         client_weights = [package["weight"] for package in client_packages.values()]
         weights = torch.tensor(client_weights) / sum(client_weights)
         if self.return_diff:  # inputs are model params diff

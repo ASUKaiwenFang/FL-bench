@@ -7,7 +7,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Subset
 
 from data.utils.datasets import BaseDataset
-from src.utils.functional import evaluate_model, get_optimal_cuda_device
+from src.utils.functional import evaluate_model, fix_random_seed, get_optimal_cuda_device
 from src.utils.metrics import Metrics
 from src.utils.models import DecoupledModel
 
@@ -125,6 +125,12 @@ class FedAvgClient:
         self.client_id = package["client_id"]
         self.local_epoch = package["local_epoch"]
         self.load_data_indices()
+
+        # Set deterministic random seed for parallel mode
+        if self.args.mode == "parallel":
+            current_epoch = package["current_epoch"]
+            client_seed = self.args.common.seed + self.client_id + current_epoch * 10000
+            fix_random_seed(client_seed, use_cuda=self.device.type == "cuda")
 
         if (
             package["optimizer_state"]
