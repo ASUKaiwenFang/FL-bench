@@ -139,7 +139,6 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
         # Get actual batch size
         actual_batch_size = next(iter(per_sample_grads.values())).size(0)
-        # print(f"client id: {self.client_id}, actual_batch_size: {actual_batch_size}")
         # Process each parameter layer independently with its own heuristic max_norm
         for param_name, per_sample_grad in per_sample_grads.items():
             # Compute per-sample gradient norms for this layer
@@ -147,9 +146,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
             per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
 
             # Heuristic: use median of per-sample norms as max_norm for this layer
-            max_norm = float(np.median(per_sample_norms_layer.detach().cpu().numpy()))
-            # if self.client_id == 14:
-            #     print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}")
+            max_norm = torch.median(per_sample_norms_layer).item()
             # Calculate per-sample clipping factors for this layer
             per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
 
@@ -159,8 +156,6 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
             # Average clipped gradients across batch
             mean_clipped_grad = clipped_grad.mean(dim=0)
-            # if self.client_id == 14:
-            #     print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
             if add_noise:
                 # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
                 sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
@@ -203,17 +198,13 @@ class DPScaffoldClient(DPFedAvgLocalClient):
         # Get actual batch size
         actual_batch_size = next(iter(per_sample_grads.values())).size(0)
         self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
-        # print(f"client id: {self.client_id}, actual_batch_size: {actual_batch_size}")
-        # Process each parameter layer independently with its own heuristic max_norm
+        # Process each parameter layer independently
         for param_name, per_sample_grad in per_sample_grads.items():
             # Compute per-sample gradient norms for this layer
             # per_sample_grad shape: [batch_size, *param_shape]
             per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
 
-            # Heuristic: use median of per-sample norms as max_norm for this layer
             max_norm = self.clip_norm
-            # if self.client_id == 14:
-            #     print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}")
             # Calculate per-sample clipping factors for this layer
             per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
 
@@ -223,11 +214,7 @@ class DPScaffoldClient(DPFedAvgLocalClient):
 
             # Average clipped gradients across batch
             mean_clipped_grad = clipped_grad.mean(dim=0)
-            # if self.client_id == 14:
-            #     print(f"client id: {self.client_id}, param_name: {param_name}, max_norm: {max_norm}, mean_clipped_grad: {mean_clipped_grad}")
             if add_noise:
-                # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
-                # sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
                 noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
                 noisy_grad = mean_clipped_grad + noise
             else:

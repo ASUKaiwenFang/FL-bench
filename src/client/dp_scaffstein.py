@@ -119,7 +119,7 @@ class DPScaffSteinClient(DPScaffoldClient):
 
         # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
         actual_batch_size = per_sample_norms.size(0)
-        self.sigma_dp = self.clip_norm * self.sigma / actual_batch_size
+        self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
 
         # Calculate per-sample clipping factors
         per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)

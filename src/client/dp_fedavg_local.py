@@ -3,6 +3,7 @@ from copy import deepcopy
 from enum import Enum
 import random
 import torch
+import numpy as np
 from src.client.fedavg import FedAvgClient
 from src.utils.dp_mechanisms import compute_per_sample_grads, compute_per_sample_norms
 
@@ -157,10 +158,9 @@ class DPFedAvgLocalClient(FedAvgClient):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
-            # logits = self.model(x)
-            # loss = self.criterion(logits, y)
-            # loss.backward()
             self._compute_clipped_gradients(x, y, add_noise=True)
+            # self._compute_clipped_gradients_heuristic(x, y, add_noise=True)
+            # self._compute_clipped_gradients_per_layer(x, y, add_noise=True)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
@@ -183,10 +183,9 @@ class DPFedAvgLocalClient(FedAvgClient):
             
             x, y = self.get_data_batch()
             self.optimizer.zero_grad()
-            # logits = self.model(x)
-            # loss = self.criterion(logits, y)
-            # loss.backward()
             self._compute_clipped_gradients(x, y, add_noise=False)
+            # self._compute_clipped_gradients_heuristic(x, y, add_noise=False)
+            # self._compute_clipped_gradients_per_layer(x, y, add_noise=False)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
@@ -210,8 +209,7 @@ class DPFedAvgLocalClient(FedAvgClient):
         # σ_DP = C * K * η_l * σ_g / b_actual
         # Note: For last_noise variant, we use configured batch_size as this represents
         # the expected batch size used throughout training
-        self.sigma_dp = (2 * self.clip_norm * self.sigma / self.args.common.batch_size) * self.local_epoch * self.args.optimizer.lr 
-        print(f"client id: {self.client_id}, sigma_dp: {self.sigma_dp}, clip_norm: {self.clip_norm}, sigma: {self.sigma}, batch_size: {self.args.common.batch_size}, local_epoch: {self.local_epoch}, lr: {self.args.optimizer.lr}")
+        self.sigma_dp = (2 * self.clip_norm * self.sigma / self.args.common.batch_size) * self.local_epoch * self.args.optimizer.lr
         # Calculate noisy parameter differences and store them
 
         for name, param in self.model.named_parameters():
@@ -254,7 +252,6 @@ class DPFedAvgLocalClient(FedAvgClient):
         # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
         actual_batch_size = per_sample_norms.size(0)
         self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
-        # print(f"client id: {self.client_id}, sigma_dp: {self.sigma_dp}, clip_norm: {self.clip_norm}, sigma: {self.sigma}, batch_size: {self.args.common.batch_size}")
         # Calculate per-sample clipping factors
         per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
 
@@ -274,7 +271,110 @@ class DPFedAvgLocalClient(FedAvgClient):
             else:
                 self._cached_model_params[param_name].grad = mean_clipped_grad
 
-    
+    def _compute_clipped_gradients_heuristic(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with heuristic median-based clipping.
+
+        This method uses a heuristic approach where each parameter layer computes its own
+        dynamic clipping threshold (max_norm) based on the median of per-sample gradient norms
+        for that layer. This allows adaptive clipping that responds to the actual gradient
+        distribution of each layer independently.
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        # Compute per-sample gradients using parent class method
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
+
+        if len(per_sample_grads) == 0:
+            return
+
+        # Get actual batch size
+        actual_batch_size = next(iter(per_sample_grads.values())).size(0)
+        # Process each parameter layer independently with its own heuristic max_norm
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Compute per-sample gradient norms for this layer
+            # per_sample_grad shape: [batch_size, *param_shape]
+            per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
+
+            # Heuristic: use median of per-sample norms as max_norm for this layer
+            max_norm = torch.median(per_sample_norms_layer).item()
+            # Calculate per-sample clipping factors for this layer
+            per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
+
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+            if add_noise:
+                # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
+                sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * sigma_dp_layer
+                noisy_grad = mean_clipped_grad + noise
+            else:
+                noisy_grad = mean_clipped_grad
+
+            # Set the final gradient
+            self._cached_model_params[param_name].grad = noisy_grad
+
+    def _compute_clipped_gradients_per_layer(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with per-layer processing.
+
+        This method processes each parameter layer independently while using
+        a uniform clipping threshold (clip_norm) across all layers. This allows
+        per-layer gradient processing with consistent privacy guarantees.
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        # Compute per-sample gradients using parent class method
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
+
+        if len(per_sample_grads) == 0:
+            return
+
+        # Get actual batch size
+        actual_batch_size = next(iter(per_sample_grads.values())).size(0)
+        self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
+        # Process each parameter layer independently
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Compute per-sample gradient norms for this layer
+            # per_sample_grad shape: [batch_size, *param_shape]
+            per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
+
+            max_norm = self.clip_norm
+            # Calculate per-sample clipping factors for this layer
+            per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
+
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+            if add_noise:
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
+                noisy_grad = mean_clipped_grad + noise
+            else:
+                noisy_grad = mean_clipped_grad
+
+            # Set the final gradient
+            self._cached_model_params[param_name].grad = noisy_grad
+
+
     def package(self):
         """Package client data including DP parameters.
 
