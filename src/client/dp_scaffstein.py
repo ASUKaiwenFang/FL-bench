@@ -157,6 +157,101 @@ class DPScaffSteinClient(DPScaffoldClient):
             c_local = self.c_local[param_name]
             self._cached_model_params[param_name].grad += (c_global - c_local).to(self.device)
 
+    def _compute_clipped_gradients_per_layer_with_step_jse(self, inputs, targets, add_noise=True):
+        """Compute per-layer clipped gradients with step-wise global JSE and SCAFFOLD correction.
+
+        This method implements per-layer gradient clipping followed by global JSE and SCAFFOLD:
+        1. Compute per-sample gradients
+        2. Clip each layer independently using uniform clip_norm
+        3. Average clipped gradients across batch
+        4. Add noise
+        5. Apply global JSE across all parameters
+        6. Add SCAFFOLD control variate correction
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        # Compute per-sample gradients
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
+
+        if len(per_sample_grads) == 0:
+            return
+
+        # Get actual batch size
+        actual_batch_size = next(iter(per_sample_grads.values())).size(0)
+        self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
+
+        # Process each parameter layer independently
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Compute per-sample gradient norms for this layer
+            # per_sample_grad shape: [batch_size, *param_shape]
+            per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
+
+            # Calculate per-sample clipping factors for this layer
+            per_sample_clip_factor = (self.clip_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
+
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+
+            if add_noise:
+                # Add Gaussian noise to averaged gradient
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
+                noisy_grad = mean_clipped_grad + noise
+            else:
+                noisy_grad = mean_clipped_grad
+
+            # Set the gradient (without control variate yet)
+            self._cached_model_params[param_name].grad = noisy_grad
+
+        # Apply global JSE to gradients (across all parameters)
+        if add_noise:
+            shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
+                list(self.model.parameters()), self.sigma_dp**2
+            )
+            # Store shrinkage factor
+            self.shrinkage_factors.append(shrinkage_factor)
+
+        # Add SCAFFOLD control variate correction after JSE
+        for param_name in per_sample_grads.keys():
+            c_global = self.c_global[param_name]
+            c_local = self.c_local[param_name]
+            self._cached_model_params[param_name].grad += (c_global - c_local).to(self.device)
+
+    def _compute_clipped_gradients_dispatch_with_step_jse(self, inputs, targets, add_noise=True):
+        """Dispatch to appropriate gradient clipping method with step-wise JSE and SCAFFOLD.
+
+        Routes to the appropriate clipping strategy based on clip_method:
+        - 'global': Global clipping with fixed clip_norm
+        - 'per_layer': Per-layer clipping with fixed clip_norm
+
+        Note: 'heuristic' method is not supported for JSE variants.
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        if self.clip_method == 'global':
+            return self._compute_clipped_gradients_with_step_jse(inputs, targets, add_noise)
+        elif self.clip_method == 'per_layer':
+            return self._compute_clipped_gradients_per_layer_with_step_jse(inputs, targets, add_noise)
+        else:
+            raise ValueError(
+                f"Unsupported clip_method for JSE: {self.clip_method}. "
+                f"JSE variants only support 'global' and 'per_layer'. "
+                f"'heuristic' is not compatible with JSE processing."
+            )
+
     def _fit_variant_2_step_noise_step_jse(self):
         """Algorithm Variant 2: Step-wise DP training with per-step JSE.
 
@@ -174,8 +269,8 @@ class DPScaffSteinClient(DPScaffoldClient):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
-            # Use new gradient computation with step-wise JSE
-            self._compute_clipped_gradients_with_step_jse(x, y, add_noise=True)
+            # Use gradient computation with step-wise JSE (supports clip_method dispatch)
+            self._compute_clipped_gradients_dispatch_with_step_jse(x, y, add_noise=True)
             self.optimizer.step()
 
             if self.lr_scheduler is not None:
