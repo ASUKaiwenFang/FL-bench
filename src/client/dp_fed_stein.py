@@ -3,6 +3,7 @@ from enum import Enum
 import torch
 from src.client.dp_fedavg_local import DPFedAvgLocalClient, AlgorithmVariant
 from src.utils.jse_utils import JSEProcessor
+from src.utils.dp_mechanisms import compute_per_sample_grads, compute_per_sample_norms
 
 
 class FedSteinAlgorithmVariant(Enum):
@@ -46,6 +47,11 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             if hasattr(original_args, 'dp_fed_stein') and hasattr(original_args.dp_fed_stein, 'data_sample_ratio'):
                 self.data_sample_ratio = original_args.dp_fed_stein.data_sample_ratio
 
+        # Initialize shrinkage factor tracking
+        self.shrinkage_factors = []
+        self.last_local_epoch_shrinkage = None
+        self.client_shrinkage_factor = None
+
 
     def fit(self):
         """Train the model with local differential privacy and JSE enhancement.
@@ -75,22 +81,63 @@ class DPFedSteinClient(DPFedAvgLocalClient):
     def _compute_clipped_gradients_with_step_jse(self, inputs, targets, add_noise=True):
         """Compute clipped per-sample gradients with step-wise JSE application.
 
-        This method extends the parent class gradient computation by adding
-        step-wise JSE processing after gradient computation.
+        This method implements the complete gradient computation flow:
+        1. Compute per-sample gradients and clip
+        2. Average clipped gradients
+        3. Add noise
+        4. Apply global JSE
 
         Args:
             inputs: Input batch tensor [batch_size, ...]
             targets: Target batch tensor [batch_size, ...]
             add_noise: Whether to add Gaussian noise to gradients
         """
-        # Use parent class gradient computation
-        super()._compute_clipped_gradients(inputs, targets, add_noise)
+        # Compute per-sample gradients using parent class method
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
 
-        # Apply step-wise JSE to gradients
+        # Compute per-sample gradient norms
+        per_sample_norms = compute_per_sample_norms(per_sample_grads)
+
+        if len(per_sample_norms) == 0:
+            return
+
+        # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
+        actual_batch_size = per_sample_norms.size(0)
+        self.sigma_dp = self.clip_norm * self.sigma / actual_batch_size
+
+        # Calculate per-sample clipping factors
+        per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
+
+        # Process gradients: clip → mean → add_noise
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+
+            if add_noise:
+                # Add Gaussian noise to averaged gradient
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
+                noisy_grad = mean_clipped_grad + noise
+            else:
+                noisy_grad = mean_clipped_grad
+
+            # Set the gradient
+            self._cached_model_params[param_name].grad = noisy_grad
+
+        # Apply global JSE to gradients
         if add_noise:
-            JSEProcessor.apply_global_jse_to_gradients(
+            shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
                 list(self.model.parameters()), self.sigma_dp**2
             )
+            # Store shrinkage factor
+            self.shrinkage_factors.append(shrinkage_factor)
 
     def _fit_variant_2_step_noise_step_jse(self):
         """Algorithm Variant 2: Step-wise DP training with per-step JSE.
@@ -101,8 +148,11 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         self.model.train()
         self.dataset.train()
 
+        # Clear shrinkage factors for new round
+        self.shrinkage_factors = []
+
         # Local training loop with per-step DP processing and JSE
-        for _ in range(self.local_epoch):
+        for epoch_idx in range(self.local_epoch):
             x, y = self.get_data_batch()
 
             self.optimizer.zero_grad()
@@ -112,6 +162,10 @@ class DPFedSteinClient(DPFedAvgLocalClient):
 
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
+
+            # Record shrinkage factor from last local epoch
+            if epoch_idx == self.local_epoch - 1 and len(self.shrinkage_factors) > 0:
+                self.last_local_epoch_shrinkage = self.shrinkage_factors[-1]
 
         self._step_noise_post_processing()
 
@@ -131,11 +185,29 @@ class DPFedSteinClient(DPFedAvgLocalClient):
 
         # Apply global JSE to final parameter differences with K factor
         # Following Algorithm 3: shrinkage = (d-2)K·σ²_DP / ||A||², where K = local_epoch
-        JSEProcessor.apply_global_jse_to_parameter_diff(
+        shrinkage_factor = JSEProcessor.apply_global_jse_to_parameter_diff(
             self.model_params_diff, self.sigma_dp**2, k_factor=self.local_epoch
         )
 
+        # Store shrinkage factor
+        self.client_shrinkage_factor = shrinkage_factor
 
+    def package(self):
+        """Package client data including DP parameters and JSE information."""
+        client_package = super().package()
 
+        # Add sigma_dp for server-side JSE processing (variant 1)
+        if hasattr(self, 'sigma_dp'):
+            client_package["sigma_dp"] = self.sigma_dp
+
+        # Add shrinkage factor for variant 2 and 3
+        if self.fed_stein_algorithm_variant == FedSteinAlgorithmVariant.STEP_NOISE_STEP_JSE:
+            # Variant 2: send last local epoch shrinkage
+            client_package["shrinkage_factor"] = self.last_local_epoch_shrinkage if self.last_local_epoch_shrinkage is not None else 1.0
+        elif self.fed_stein_algorithm_variant == FedSteinAlgorithmVariant.STEP_NOISE_FINAL_JSE:
+            # Variant 3: send client shrinkage factor
+            client_package["shrinkage_factor"] = self.client_shrinkage_factor if self.client_shrinkage_factor is not None else 1.0
+
+        return client_package
 
 
