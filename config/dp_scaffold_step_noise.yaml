@@ -19,7 +19,7 @@ dataset:
 
 # Model settings
 model:
-  name: nn1
+  name: 2nn
 
 # Training settings
 common:
@@ -41,4 +41,4 @@ dp_scaffold:
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.0005
+  lr: 0.001

@@ -25,15 +25,8 @@ common:
   global_epoch: 100
   local_epoch: 50
   batch_size: 32
-  test:
-    server:
-      interval: 1
-      train: false
-      val: false
-      test: true
-      # Whether to evaluate the global model in train mode or eval mode.
-      # Evaluating in train mode allows to get better batchnorm statistics, but is dependent on the order of the data.
-      model_in_train_mode: false
+  monitor: tensorboard
+
 
 # DP-SCAFFOLD specific parameters - Last Noise Variant
 dp_scaffold:
@@ -46,4 +39,4 @@ dp_scaffold:
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.01
+  lr: 0.001

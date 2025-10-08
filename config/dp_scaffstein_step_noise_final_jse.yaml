@@ -42,4 +42,4 @@ dp_scaffstein:
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.5
+  lr: 0.001
