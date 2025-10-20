@@ -206,14 +206,83 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             # Store shrinkage factor
             self.shrinkage_factors.append(shrinkage_factor)
 
+    def _compute_clipped_gradients_heuristic_with_step_jse(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with heuristic median-based clipping and step-wise JSE.
+
+        This method uses a heuristic approach where each parameter layer computes its own
+        dynamic clipping threshold (max_norm) based on the median of per-sample gradient norms
+        for that layer. Each layer uses its own sigma_dp_layer for noise addition and JSE processing.
+
+        Implementation flow:
+        1. Compute per-sample gradients
+        2. For each layer independently:
+           - Compute median of per-sample norms as max_norm
+           - Clip gradients using layer-specific max_norm
+           - Average clipped gradients
+           - Add noise with layer-specific sigma_dp_layer = 2 * max_norm * σ_g / b_actual
+           - Apply JSE with layer-specific noise_variance = sigma_dp_layer²
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        # Compute per-sample gradients
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
+
+        if len(per_sample_grads) == 0:
+            return
+
+        # Get actual batch size
+        actual_batch_size = next(iter(per_sample_grads.values())).size(0)
+
+        # Process each parameter layer independently with its own heuristic max_norm
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Compute per-sample gradient norms for this layer
+            # per_sample_grad shape: [batch_size, *param_shape]
+            per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
+
+            # Heuristic: use median of per-sample norms as max_norm for this layer
+            max_norm = torch.median(per_sample_norms_layer).item()
+
+            # Calculate per-sample clipping factors for this layer
+            per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
+
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+
+            if add_noise:
+                # Calculate layer-specific DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
+                sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
+
+                # Add Gaussian noise to averaged gradient
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * sigma_dp_layer
+                noisy_grad = mean_clipped_grad + noise
+
+                # Apply JSE shrinkage with layer-specific noise variance
+                jse_grad, _ = JSEProcessor.apply_jse_shrinkage_to_mean(noisy_grad, sigma_dp_layer**2)
+
+                # Set the final gradient
+                self._cached_model_params[param_name].grad = jse_grad
+            else:
+                # Set the gradient without noise
+                self._cached_model_params[param_name].grad = mean_clipped_grad
+
     def _compute_clipped_gradients_dispatch_with_step_jse(self, inputs, targets, add_noise=True):
         """Dispatch to appropriate gradient clipping method with step-wise JSE.
 
         Routes to the appropriate clipping strategy based on clip_method:
         - 'global': Global clipping with fixed clip_norm
         - 'per_layer': Per-layer clipping with fixed clip_norm
-
-        Note: 'heuristic' method is not supported for JSE variants.
+        - 'heuristic': Adaptive per-layer clipping using median
 
         Args:
             inputs: Input batch tensor [batch_size, ...]
@@ -224,11 +293,12 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             return self._compute_clipped_gradients_with_step_jse(inputs, targets, add_noise)
         elif self.clip_method == 'per_layer':
             return self._compute_clipped_gradients_per_layer_with_step_jse(inputs, targets, add_noise)
+        elif self.clip_method == 'heuristic':
+            return self._compute_clipped_gradients_heuristic_with_step_jse(inputs, targets, add_noise)
         else:
             raise ValueError(
                 f"Unsupported clip_method for JSE: {self.clip_method}. "
-                f"JSE variants only support 'global' and 'per_layer'. "
-                f"'heuristic' is not compatible with JSE processing."
+                f"JSE variants support 'global', 'per_layer', and 'heuristic'."
             )
 
     def _fit_variant_2_step_noise_step_jse(self):

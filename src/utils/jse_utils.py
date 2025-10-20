@@ -148,6 +148,7 @@ class JSEProcessor:
 
         # Check if JSE is applicable
         if not JSEProcessor._check_tensor_applicability(tensor):
+            print(f"[JSE] apply_jse_shrinkage_to_mean: tensor is not applicable, size={tensor.size()}")
             return tensor, 1.0
 
         # Compute mean and centered tensor
@@ -169,6 +170,7 @@ class JSEProcessor:
 
         # Numerical stability check
         if not JSEProcessor._is_numerically_stable(centered_norm_sq):
+            print(f"[JSE] apply_jse_shrinkage_to_mean: centered_norm_sq is not numerically stable, size={tensor_size}, centered_norm_sq={centered_norm_sq:.6f}, norm_sq={torch.sum(tensor ** 2):.6f}")
             return tensor, 1.0
 
         # Calculate shrinkage factor with numerical stability
