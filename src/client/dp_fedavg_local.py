@@ -207,7 +207,7 @@ class DPFedAvgLocalClient(FedAvgClient):
         # σ_DP = C * K * η_l * σ_g / b_actual
         # Note: For last_noise variant, we use configured batch_size as this represents
         # the expected batch size used throughout training
-        self.sigma_dp = (2 * self.clip_norm * self.sigma / self.args.common.batch_size) * self.local_epoch * self.args.optimizer.lr
+        self.sigma_dp = (2 * self.clip_norm * self.sigma / self.args.common.batch_size) #* self.local_epoch * self.args.optimizer.lr
         # Calculate noisy parameter differences and store them
 
         for name, param in self.model.named_parameters():

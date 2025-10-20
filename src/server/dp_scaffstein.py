@@ -120,7 +120,7 @@ class DPScaffSteinServer(DPScaffoldServer):
         # Apply global JSE to the aggregated public model parameters
         # Note: For server-side JSE, we apply JSE to the aggregated parameters directly
         shrinkage_factor = JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.public_model_params, sigma_dp_squared, k_factor=1  # k_factor=1 for server-side JSE
+            self.public_model_params, sigma_dp_squared, k_factor=1/int(self.client_num * self.args.common.join_ratio)  # k_factor=1 for server-side JSE
         )
 
         # Record shrinkage factor for variant 1

@@ -31,11 +31,11 @@ dp_scaffstein:
   algorithm_variant: "last_noise_server_jse"  # Parameter-level noise + server JSE
   clip_method: "global"            # Clipping method: global, heuristic, per_layer
   clip_norm: 1.0                              # Gradient clipping threshold
-  sigma: 30.0                                    # Noise standard deviation parameter
+  sigma: 3.0                                    # Noise standard deviation parameter
   data_sample_ratio: 0.2                      # Data sampling ratio (0.2 = 20% of trainset)
   global_lr: 1.0                              # SCAFFOLD global learning rate
 
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.001
+  lr: 0.5

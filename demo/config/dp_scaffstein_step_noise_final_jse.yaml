@@ -27,7 +27,7 @@ common:
   seed: 42
   join_ratio: 0.2
   global_epoch: 100
-  local_epoch: 50
+  local_epoch: 5
   batch_size: 32
   monitor: tensorboard
 
@@ -43,4 +43,4 @@ dp_scaffstein:
 # Optimizer settings
 optimizer:
   name: sgd
-  lr: 0.001
+  lr: 0.5

@@ -433,13 +433,13 @@ if __name__ == "__main__":
         help="Dataset name"
     )
     parser.add_argument(
-        "-cn", "--client_num", type=int, default=100,
+        "-cn", "--client_num", type=int, default=60,
         help="Number of clients"
     )
 
     # Core parameter
     parser.add_argument(
-        "-sim", "--similarity", type=float, default=0.5,
+        "-sim", "--similarity", type=float, default=0.1,
         help="Similarity parameter (0.0-1.0): controls the proportion of IID data"
     )
 

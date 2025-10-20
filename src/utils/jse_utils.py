@@ -105,16 +105,86 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        # print(f"[JSE] apply_jse_shrinkage: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={tensor_norm_sq:.6f}, elements={d}, zeros={num_zeros}/{total_elements} ({zero_ratio:.2%}), mean={tensor_mean:.6f}, std={tensor_std:.6f}, min={tensor_min:.6f}, max={tensor_max:.6f}, add_noise={noise_variance:.6f}")
+        print(f"[JSE] apply_jse_shrinkage: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={tensor_norm_sq:.6f}, elements={d}, zeros={num_zeros}/{total_elements} ({zero_ratio:.2%}), mean={tensor_mean:.6f}, std={tensor_std:.6f}, min={tensor_min:.6f}, max={tensor_max:.6f}, add_noise={noise_variance:.6f}")
 
         # Print all data for small tensors (e.g., bias with 10 elements)
-        if d == 10:
-            print(f"[JSE] Tensor data (10 elements): {tensor.flatten().tolist()}")
+        # if d == 10:
+        #     print(f"[JSE] Tensor data (10 elements): {tensor.flatten().tolist()}")
 
         shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Apply shrinkage: result = shrinkage_multiplier * tensor
         return shrinkage_multiplier * tensor, shrinkage_multiplier.item()
+
+    @staticmethod
+    def apply_jse_shrinkage_to_mean(
+        tensor: torch.Tensor,
+        noise_variance: float,
+        k_factor: int = 1
+    ) -> tuple:
+        """
+        Apply James-Stein shrinkage to a tensor towards its mean with enhanced numerical stability.
+
+        This method implements the mean-centered James-Stein estimator shrinkage formula:
+        centered = tensor - mean(tensor)
+        shrinkage_factor = max(0, 1 - (d-2) * k_factor * σ² / ||centered||²)
+        result = mean + shrinkage_multiplier * centered
+
+        Args:
+            tensor: Input tensor to apply shrinkage to
+            noise_variance: Noise variance σ² from DP mechanism
+            k_factor: Accumulation factor for multi-step scenarios (default: 1)
+
+        Returns:
+            Tuple of (shrinked_tensor, shrinkage_multiplier_value)
+        """
+        # Input validation
+        JSEProcessor._validate_noise_variance(noise_variance)
+        JSEProcessor._validate_k_factor(k_factor)
+
+        # Handle empty tensors
+        if tensor.numel() == 0:
+            return tensor, 1.0
+
+        # Check if JSE is applicable
+        if not JSEProcessor._check_tensor_applicability(tensor):
+            return tensor, 1.0
+
+        # Compute mean and centered tensor
+        mean = torch.mean(tensor)
+        centered = tensor - mean
+
+        # Compute centered tensor norm squared using stable method
+        centered_norm_sq = torch.sum(centered ** 2)
+
+        # Count zero elements and compute statistics
+        num_zeros = torch.sum(tensor == 0).item()
+        total_elements = tensor.numel()
+        zero_ratio = num_zeros / total_elements if total_elements > 0 else 0
+        tensor_mean = torch.mean(tensor).item()
+        tensor_std = torch.std(tensor).item()
+        tensor_min = torch.min(tensor).item()
+        tensor_max = torch.max(tensor).item()
+        tensor_size = tuple(tensor.size())
+
+        # Numerical stability check
+        if not JSEProcessor._is_numerically_stable(centered_norm_sq):
+            return tensor, 1.0
+
+        # Calculate shrinkage factor with numerical stability
+        d = tensor.numel()
+        shrinkage_numerator = (d - 2) * k_factor * noise_variance
+        shrinkage_factor = shrinkage_numerator / centered_norm_sq
+
+        # Calculate shrinkage multiplier and apply bounds
+        shrinkage_multiplier = 1.0 - shrinkage_factor
+        print(f"[JSE] apply_jse_shrinkage_to_mean: size={tensor_size}, shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, centered_norm_sq={centered_norm_sq:.6f}, elements={d}, zeros={num_zeros}/{total_elements} ({zero_ratio:.2%}), mean={tensor_mean:.6f}, std={tensor_std:.6f}, min={tensor_min:.6f}, max={tensor_max:.6f}, add_noise={noise_variance:.6f}")
+
+        # shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
+
+        # Apply shrinkage: result = mean + shrinkage_multiplier * centered
+        result = mean + shrinkage_multiplier * centered
+        return result, shrinkage_multiplier.item()
 
     @staticmethod
     def apply_layerwise_jse_to_gradients(
@@ -137,10 +207,11 @@ class JSEProcessor:
         for param in model_parameters:
             if param.grad is not None:
                 # Apply JSE shrinkage to gradient in-place
-                param.grad.data = JSEProcessor.apply_jse_shrinkage(
+                param.grad.data,_ = JSEProcessor.apply_jse_shrinkage(
                     param.grad.data, noise_variance
                 )
 
+    
 
     @staticmethod
     def apply_global_jse_to_gradients(
@@ -208,8 +279,8 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        # print(f"[JSE] apply_global_jse_to_gradients: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
-        shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
+        print(f"[JSE] apply_global_jse_to_gradients: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
+        # shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Step 3: Apply shrinkage to each gradient directly in-place
 
@@ -237,8 +308,12 @@ class JSEProcessor:
             noise_variance: Noise variance σ² from DP mechanism
             k_factor: Accumulation factor for multi-step scenarios (default: 1)
         """
+        # for key, param_tensor in param_diff_dict.items():
+        #     param_diff_dict[key], _ = JSEProcessor.apply_jse_shrinkage(
+        #         param_tensor, noise_variance, k_factor
+        #     )
         for key, param_tensor in param_diff_dict.items():
-            param_diff_dict[key] = JSEProcessor.apply_jse_shrinkage(
+            param_diff_dict[key], _ = JSEProcessor.apply_jse_shrinkage_to_mean(
                 param_tensor, noise_variance, k_factor
             )
 
@@ -310,8 +385,8 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        # print(f"[JSE] apply_global_jse_to_parameter_diff: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
-        shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
+        print(f"[JSE] apply_global_jse_to_parameter_diff: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
+        # shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Step 3: Apply shrinkage to each parameter individually in-place
 

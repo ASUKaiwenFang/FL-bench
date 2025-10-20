@@ -133,7 +133,11 @@ class DPFedSteinClient(DPFedAvgLocalClient):
 
         # Apply global JSE to gradients
         if add_noise:
-            shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
+            # shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
+            #     list(self.model.parameters()), self.sigma_dp**2
+            # )
+            shrinkage_factor = 1.0
+            JSEProcessor.apply_layerwise_jse_to_gradients(
                 list(self.model.parameters()), self.sigma_dp**2
             )
             # Store shrinkage factor
