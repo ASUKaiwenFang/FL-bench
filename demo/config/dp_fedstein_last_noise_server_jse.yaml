@@ -31,7 +31,7 @@ dp_fed_stein:
   algorithm_variant: "last_noise_server_jse"  # Parameter-level noise + server-side JSE
   clip_method: "global"            # Clipping method: global, heuristic, per_layer
   clip_norm: 1.0                              # Gradient clipping threshold
-  sigma: 0.3                                    # Noise standard deviation parameter
+  sigma: 0                                    # Noise standard deviation parameter
   data_sample_ratio: 0.2                    # Data sampling ratio (0.2 = 20% of trainset)
 
 optimizer:

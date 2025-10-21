@@ -227,11 +227,13 @@ class NN1(DecoupledModel):
 
     def __init__(self, dataset: str, pretrained):
         super(NN1, self).__init__()
-        self.base = nn.Sequential(
-            nn.Linear(self.feature_length[dataset], 32),
-            nn.Sigmoid(),
-        )
-        self.classifier = nn.Linear(32, NUM_CLASSES[dataset])
+        # self.base = nn.Sequential(
+        #     nn.Linear(self.feature_length[dataset], 32),
+        #     nn.Sigmoid(),
+        # )
+        # self.classifier = nn.Linear(32, NUM_CLASSES[dataset])
+        self.base = nn.Sequential()
+        self.classifier = nn.Linear(self.feature_length[dataset], NUM_CLASSES[dataset])
 
     def need_all_features(self):
         return
