@@ -4,6 +4,30 @@ import torch
 from src.client.dp_fedavg_local import DPFedAvgLocalClient, AlgorithmVariant
 from src.utils.jse_utils import JSEProcessor
 from src.utils.dp_mechanisms import compute_per_sample_grads, compute_per_sample_norms
+import logging
+import sys
+
+# Configure logging for debug output
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logger.setLevel(logging.DEBUG)
+
+    # Create file handler
+    fh = logging.FileHandler('dp_fed_stein_debug.log')
+    fh.setLevel(logging.DEBUG)
+
+    # Create console handler
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.DEBUG)
+
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+
+    # Add handlers
+    logger.addHandler(fh)
+    logger.addHandler(ch)
 
 
 class FedSteinAlgorithmVariant(Enum):
@@ -241,15 +265,15 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         actual_batch_size = next(iter(per_sample_grads.values())).size(0)
 
         # Debug: Print per_sample_grads statistics
-        print(f"\n{'='*60}")
-        print(f"[DEBUG] Per-sample gradients summary (batch_size={actual_batch_size}):")
-        print(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"[DEBUG] Per-sample gradients summary (batch_size={actual_batch_size}):")
+        logger.info(f"{'='*60}")
         for param_name, per_sample_grad in per_sample_grads.items():
             grad_norm = per_sample_grad.norm().item()
             grad_mean = per_sample_grad.mean().item()
             grad_max = per_sample_grad.abs().max().item()
-            print(f"  {param_name:40s}: shape={str(tuple(per_sample_grad.shape)):25s}, norm={grad_norm:12.6f}, mean={grad_mean:12.6f}, max={grad_max:12.6f}")
-        print(f"{'='*60}\n")
+            logger.info(f"  {param_name:40s}: shape={str(tuple(per_sample_grad.shape)):25s}, norm={grad_norm:12.6f}, mean={grad_mean:12.6f}, max={grad_max:12.6f}")
+        logger.info(f"{'='*60}\n")
 
         # Process each parameter layer independently with its own heuristic max_norm
         for param_name, per_sample_grad in per_sample_grads.items():
@@ -259,7 +283,7 @@ class DPFedSteinClient(DPFedAvgLocalClient):
 
             # Heuristic: use median of per-sample norms as max_norm for this layer
             max_norm = torch.median(per_sample_norms_layer).item()
-            print(f"max_norm: {max_norm}")
+            logger.info(f"max_norm: {max_norm}")
             # Calculate per-sample clipping factors for this layer
             per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
             # print(f"per_sample_clip_factor: {per_sample_clip_factor}")
@@ -269,41 +293,41 @@ class DPFedSteinClient(DPFedAvgLocalClient):
 
             # Average clipped gradients across batch
             mean_clipped_grad = clipped_grad.mean(dim=0)
-            for i in range(mean_clipped_grad.size(0)):
-                print(f"mean_clipped_grad[{i}], shape: {mean_clipped_grad[i].shape}, norm: {mean_clipped_grad[i].norm():.6f}, mean: {mean_clipped_grad[i].mean():.6f}, std: {mean_clipped_grad[i].std():.6f}, min: {mean_clipped_grad[i].min():.6f}, max: {mean_clipped_grad[i].max():.6f}")
+            # for i in range(mean_clipped_grad.size(0)):
+            #     print(f"mean_clipped_grad[{i}], shape: {mean_clipped_grad[i].shape}, norm: {mean_clipped_grad[i].norm():.6f}, mean: {mean_clipped_grad[i].mean():.6f}, std: {mean_clipped_grad[i].std():.6f}, min: {mean_clipped_grad[i].min():.6f}, max: {mean_clipped_grad[i].max():.6f}")
 
             # Debug: Check for zero gradients
             if mean_clipped_grad.norm() < 1e-8:
-                print(f"[WARNING] {param_name} has zero gradient after clipping! norm={mean_clipped_grad.norm():.10f}")
+                logger.warning(f"{param_name} has zero gradient after clipping! norm={mean_clipped_grad.norm():.10f}")
 
             if add_noise:
                 # Calculate layer-specific DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
                 sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
-                print(f"sigma_dp_layer: {sigma_dp_layer}")
+                logger.info(f"sigma_dp_layer: {sigma_dp_layer}")
                 # Add Gaussian noise to averaged gradient
                 noise = torch.randn_like(mean_clipped_grad, device=self.device) * sigma_dp_layer
                 noisy_grad = mean_clipped_grad + noise
                 for i in range(noisy_grad.size(0)):
-                    print(f"noisy_grad[{i}], shape: {noisy_grad[i].shape}, norm: {noisy_grad[i].norm():.6f}, mean: {noisy_grad[i].mean():.6f}, std: {noisy_grad[i].std():.6f}, min: {noisy_grad[i].min():.6f}, max: {noisy_grad[i].max():.6f}")
+                    logger.info(f"noisy_grad[{i}], shape: {noisy_grad[i].shape}, norm: {noisy_grad[i].norm():.6f}, mean: {noisy_grad[i].mean():.6f}, std: {noisy_grad[i].std():.6f}, min: {noisy_grad[i].min():.6f}, max: {noisy_grad[i].max():.6f}")
                 # Apply JSE shrinkage with layer-specific noise variance
                 # Original: apply JSE to entire tensor
                 # jse_grad, _ = JSEProcessor.apply_jse_shrinkage_to_mean(noisy_grad, sigma_dp_layer**2)
-
+                self._cached_model_params[param_name].grad = noisy_grad
                 # Modified: apply JSE to each row separately
-                if noisy_grad.ndim >= 2:
-                    # Multi-dimensional tensor (e.g., weight matrix), apply JSE to each row
-                    jse_grad_rows = []
-                    for i in range(noisy_grad.size(0)):
-                        print("noisy_grad[{}]: ".format(i))
-                        row_jse, _ = JSEProcessor.apply_jse_shrinkage(noisy_grad[i], sigma_dp_layer**2)
-                        jse_grad_rows.append(row_jse)
-                    jse_grad = torch.stack(jse_grad_rows, dim=0)
-                else:
-                    # 1D tensor (e.g., bias), apply JSE globally
-                    jse_grad, _ = JSEProcessor.apply_jse_shrinkage(noisy_grad, sigma_dp_layer**2)
+                # if noisy_grad.ndim >= 2:
+                #     # Multi-dimensional tensor (e.g., weight matrix), apply JSE to each row
+                #     jse_grad_rows = []
+                #     for i in range(noisy_grad.size(0)):
+                #         print("noisy_grad[{}]: ".format(i))
+                #         row_jse, _ = JSEProcessor.apply_jse_shrinkage(noisy_grad[i], sigma_dp_layer**2)
+                #         jse_grad_rows.append(row_jse)
+                #     jse_grad = torch.stack(jse_grad_rows, dim=0)
+                # else:
+                #     # 1D tensor (e.g., bias), apply JSE globally
+                #     jse_grad, _ = JSEProcessor.apply_jse_shrinkage(noisy_grad, sigma_dp_layer**2)
 
-                # Set the final gradient
-                self._cached_model_params[param_name].grad = jse_grad
+                # # Set the final gradient
+                # self._cached_model_params[param_name].grad = jse_grad
             else:
                 # Set the gradient without noise
                 self._cached_model_params[param_name].grad = mean_clipped_grad
@@ -351,12 +375,12 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         self.dataset.train()
 
         # Debug: Check model parameters requires_grad
-        print(f"\n{'='*60}")
-        print(f"[DEBUG] Model parameters status:")
-        print(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"[DEBUG] Model parameters status:")
+        logger.info(f"{'='*60}")
         for name, param in self.model.named_parameters():
-            print(f"  {name:40s}: requires_grad={param.requires_grad!s:5}, shape={str(tuple(param.shape)):20s}, norm={param.norm().item():.6f}")
-        print(f"{'='*60}\n")
+            logger.info(f"  {name:40s}: requires_grad={param.requires_grad!s:5}, shape={str(tuple(param.shape)):20s}, norm={param.norm().item():.6f}")
+        logger.info(f"{'='*60}\n")
 
         # Clear shrinkage factors for new round
         self.shrinkage_factors = []

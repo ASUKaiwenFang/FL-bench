@@ -6,6 +6,30 @@ import torch
 import numpy as np
 from src.client.fedavg import FedAvgClient
 from src.utils.dp_mechanisms import compute_per_sample_grads, compute_per_sample_norms
+import logging
+import sys
+
+# Configure logging for debug output
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logger.setLevel(logging.DEBUG)
+
+    # Create file handler
+    fh = logging.FileHandler('dp_fedavg_local_debug.log')
+    fh.setLevel(logging.DEBUG)
+
+    # Create console handler
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.DEBUG)
+
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+
+    # Add handlers
+    logger.addHandler(fh)
+    logger.addHandler(ch)
 
 
 class AlgorithmVariant(Enum):
@@ -302,6 +326,7 @@ class DPFedAvgLocalClient(FedAvgClient):
 
             # Heuristic: use median of per-sample norms as max_norm for this layer
             max_norm = torch.median(per_sample_norms_layer).item()
+            # print(f"max_norm: {max_norm}")
             # Calculate per-sample clipping factors for this layer
             per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
 
@@ -311,11 +336,14 @@ class DPFedAvgLocalClient(FedAvgClient):
 
             # Average clipped gradients across batch
             mean_clipped_grad = clipped_grad.mean(dim=0)
+            logger.info(f"[{param_name}] mean_clipped_grad: shape={mean_clipped_grad.shape}, norm={mean_clipped_grad.norm():.6f}, mean={mean_clipped_grad.mean():.6f}, std={mean_clipped_grad.std():.6f}, min={mean_clipped_grad.min():.6f}, max={mean_clipped_grad.max():.6f}")
             if add_noise:
                 # Calculate DP noise standard deviation: σ_DP = 2 * max_norm * σ_g / b_actual
                 sigma_dp_layer = 2 * max_norm * self.sigma / actual_batch_size
+                # print(f"sigma_dp_layer: {sigma_dp_layer}")
                 noise = torch.randn_like(mean_clipped_grad, device=self.device) * sigma_dp_layer
                 noisy_grad = mean_clipped_grad + noise
+                logger.info(f"[{param_name}] noisy_grad: shape={noisy_grad.shape}, norm={noisy_grad.norm():.6f}, mean={noisy_grad.mean():.6f}, std={noisy_grad.std():.6f}, min={noisy_grad.min():.6f}, max={noisy_grad.max():.6f}")
             else:
                 noisy_grad = mean_clipped_grad
 
@@ -354,6 +382,7 @@ class DPFedAvgLocalClient(FedAvgClient):
             per_sample_norms_layer = per_sample_grad.reshape(actual_batch_size, -1).norm(2, dim=1)
 
             max_norm = self.clip_norm
+            logger.info(f"max_norm: {max_norm}")
             # Calculate per-sample clipping factors for this layer
             per_sample_clip_factor = (max_norm / (per_sample_norms_layer + self.numerical_epsilon)).clamp(max=1.0)
 
@@ -363,6 +392,7 @@ class DPFedAvgLocalClient(FedAvgClient):
 
             # Average clipped gradients across batch
             mean_clipped_grad = clipped_grad.mean(dim=0)
+            logger.info(f"[{param_name}] mean_clipped_grad: shape={mean_clipped_grad.shape}, norm={mean_clipped_grad.norm():.6f}, mean={mean_clipped_grad.mean():.6f}, std={mean_clipped_grad.std():.6f}, min={mean_clipped_grad.min():.6f}, max={mean_clipped_grad.max():.6f}")
             if add_noise:
                 noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
                 noisy_grad = mean_clipped_grad + noise

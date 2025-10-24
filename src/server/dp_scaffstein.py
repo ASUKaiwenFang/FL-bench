@@ -84,47 +84,62 @@ class DPScaffSteinServer(DPScaffoldServer):
         if self.algorithm_variant in [2, 3]:  # step_noise_step_jse or step_noise_final_jse
             self._record_client_shrinkage_factors(client_packages)
 
-        # First, perform standard SCAFFOLD aggregation
-        super().aggregate_client_updates(client_packages)
-
-        # Apply server-side JSE for variant 1 only
+        # For variant 1, we need custom aggregation with post-aggregation JSE
         if self.algorithm_variant == 1:  # last_noise_server_jse
-            self._apply_server_jse(client_packages)
+            self._aggregate_with_post_jse_variant_1(client_packages)
+        else:
+            # For other variants, use standard aggregation
+            super().aggregate_client_updates(client_packages)
 
         # Log shrinkage factors to tensorboard
         self._log_shrinkage_to_tensorboard(client_packages)
 
-    def _apply_server_jse(self, client_packages) -> None:
-        """Apply server-side JSE to aggregated parameter differences.
+    def _aggregate_with_post_jse_variant_1(self, client_packages: OrderedDict[int, Dict[str, Any]]):
+        """Aggregate client updates and then apply server-side JSE for variant 1.
 
-        This method is only used for algorithm variant 1 (last_noise_server_jse).
-        It applies global JSE shrinkage to the aggregated parameter differences.
+        For the last_noise_server_jse variant, this method:
+        1. Aggregates client parameter differences using weighted averaging
+        2. Applies global JSE to the aggregated result
+        3. Updates the global model parameters
 
         Args:
-            client_packages: OrderedDict of client data packages
+            client_packages: OrderedDict of client packages containing noisy parameter updates
         """
-        if not client_packages:
-            return
 
-        # Extract sigma_dp from first client package (should be consistent across clients)
-        first_client_id = list(client_packages.keys())[0]
-        first_package = client_packages[first_client_id]
+        # Step 1: Extract weights and compute normalized weights
+        client_weights = [package["weight"] for package in client_packages.values()]
+        weights = torch.tensor(client_weights) / sum(client_weights)
 
-        # Get sigma_dp from client package, fall back to server configuration if not present
-        sigma_dp = first_package.get('sigma_dp', self.sigma)
-        sigma_dp_squared = sigma_dp ** 2
+        # Step 2: Aggregate parameter differences
+        aggregated_diff = {}
+        for name, global_param in self.public_model_params.items():
+            diffs = torch.stack(
+                [package["model_params_diff"][name] for package in client_packages.values()],
+                dim=-1,
+            )
+            aggregated_diff[name] = torch.sum(diffs * weights, dim=-1)
 
-        if sigma_dp_squared <= 0:
-            return  # No JSE processing if no DP noise
+        # Step 3: Apply global JSE to the aggregated differences
+        # Extract noise variance from first client package (should be same for all)
+        noise_variance = list(client_packages.values())[0]["sigma_dp"]**2
+        k_factor = 1/int(self.client_num * self.args.common.join_ratio)
+        global_lr = self.args.dp_scaffstein.global_lr
 
-        # Apply global JSE to the aggregated public model parameters
-        # Note: For server-side JSE, we apply JSE to the aggregated parameters directly
-        shrinkage_factor = JSEProcessor.apply_global_jse_to_parameter_diff(
-            self.public_model_params, sigma_dp_squared, k_factor=1/int(self.client_num * self.args.common.join_ratio)  # k_factor=1 for server-side JSE
+        # Apply global JSE to the aggregated parameter differences
+        shrinkage_factor = 1.0
+        JSEProcessor.apply_layerwise_jse_to_parameter_diff(
+            aggregated_diff, noise_variance, k_factor
         )
 
         # Record shrinkage factor for variant 1
         self.shrinkage_history[self.current_epoch] = {"server": shrinkage_factor}
+
+        # Step 4: Update global model parameters with JSE-processed differences
+        for name, global_param in self.public_model_params.items():
+            self.public_model_params[name].data += global_lr * aggregated_diff[name]
+
+        # Step 5: Load updated parameters into model
+        self.model.load_state_dict(self.public_model_params, strict=False)
 
     def _record_client_shrinkage_factors(self, client_packages: Dict[int, Dict[str, Any]]) -> None:
         """Record shrinkage factors from client packages.

@@ -15,14 +15,14 @@ method: dp_fed_stein
 
 # Model settings
 model:
-  name: nn1
+  name: 2nn
 
 # Training settings
 common:
   seed: 42
   join_ratio: 0.2
   global_epoch: 100
-  local_epoch: 5
+  local_epoch: 50
   batch_size: 32
   monitor: tensorboard
 
@@ -36,7 +36,7 @@ dp_fed_stein:
 
 optimizer:
   name: sgd # [sgd, adam, adamw, rmsprop, adagrad]
-  lr: 0.01
+  lr: 0.001
 
 dataset:
   # [mnist, cifar10, cifar100, emnist, fmnist, femnist, medmnist,
