@@ -63,6 +63,9 @@ class DPScaffSteinClient(DPScaffoldClient):
         self.last_local_epoch_shrinkage = None
         self.client_shrinkage_factor = None
 
+        # Initialize JSE sign tracking for variant 2
+        self.jse_sign_tracker = {'positive': 0, 'negative': 0, 'zero': 0}
+
     def fit(self):
         """Train the model with DP-ScaffStein algorithm.
 
@@ -151,6 +154,14 @@ class DPScaffSteinClient(DPScaffoldClient):
             # Store shrinkage factor
             self.shrinkage_factors.append(shrinkage_factor)
 
+            # Track sign of shrinkage factor
+            if shrinkage_factor > 0:
+                self.jse_sign_tracker['positive'] += 1
+            elif shrinkage_factor < 0:
+                self.jse_sign_tracker['negative'] += 1
+            else:
+                self.jse_sign_tracker['zero'] += 1
+
         # Add SCAFFOLD control variate correction after JSE
         for param_name in per_sample_grads.keys():
             c_global = self.c_global[param_name]
@@ -221,6 +232,14 @@ class DPScaffSteinClient(DPScaffoldClient):
             # Store shrinkage factor
             self.shrinkage_factors.append(shrinkage_factor)
 
+            # Track sign of shrinkage factor
+            if shrinkage_factor > 0:
+                self.jse_sign_tracker['positive'] += 1
+            elif shrinkage_factor < 0:
+                self.jse_sign_tracker['negative'] += 1
+            else:
+                self.jse_sign_tracker['zero'] += 1
+
         # Add SCAFFOLD control variate correction after JSE
         for param_name in per_sample_grads.keys():
             c_global = self.c_global[param_name]
@@ -263,6 +282,9 @@ class DPScaffSteinClient(DPScaffoldClient):
 
         # Clear shrinkage factors for new round
         self.shrinkage_factors = []
+
+        # Clear JSE sign tracker for new round
+        self.jse_sign_tracker = {'positive': 0, 'negative': 0, 'zero': 0}
 
         # Local training loop with per-step DP processing and JSE
         for epoch_idx in range(self.local_epoch):
@@ -319,6 +341,11 @@ class DPScaffSteinClient(DPScaffoldClient):
         if self.scaffstein_algorithm_variant == ScaffSteinAlgorithmVariant.STEP_NOISE_STEP_JSE:
             # Variant 2: send last local epoch shrinkage
             client_package["shrinkage_factor"] = self.last_local_epoch_shrinkage if self.last_local_epoch_shrinkage is not None else 1.0
+            # Add JSE sign statistics
+            total_count = sum(self.jse_sign_tracker.values())
+            positive_ratio = self.jse_sign_tracker['positive'] / total_count if total_count > 0 else 0.0
+            client_package["jse_sign_stats"] = self.jse_sign_tracker.copy()
+            client_package["jse_positive_ratio"] = positive_ratio
         elif self.scaffstein_algorithm_variant == ScaffSteinAlgorithmVariant.STEP_NOISE_FINAL_JSE:
             # Variant 3: send client shrinkage factor
             client_package["shrinkage_factor"] = self.client_shrinkage_factor if self.client_shrinkage_factor is not None else 1.0

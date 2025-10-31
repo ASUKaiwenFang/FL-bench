@@ -17,23 +17,24 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 
-def load_shrinkage_data(json_path: str) -> Tuple[str, Dict]:
+def load_shrinkage_data(json_path: str) -> Tuple[str, Dict, Dict]:
     """
-    Load shrinkage factor data from JSON file.
+    Load shrinkage factor data and JSE sign statistics from JSON file.
 
     Args:
         json_path: Path to shrinkage_factors.json file
 
     Returns:
-        Tuple of (algorithm_variant, data_dict)
+        Tuple of (algorithm_variant, shrinkage_data_dict, jse_sign_data_dict)
     """
     with open(json_path, 'r') as f:
         data = json.load(f)
 
     algorithm_variant = data.get("algorithm_variant", "unknown")
     shrinkage_data = data.get("data", {})
+    jse_sign_data = data.get("jse_sign_statistics", {})
 
-    return algorithm_variant, shrinkage_data
+    return algorithm_variant, shrinkage_data, jse_sign_data
 
 
 def plot_algorithm1(data: Dict, output_path: str, title: str = "Algorithm 1: Server-side JSE Shrinkage Factors"):
@@ -183,6 +184,71 @@ def plot_algorithm2_3(data: Dict, output_path: str, title: str = "Algorithm 2/3:
     plt.close()
 
 
+def plot_jse_positive_ratio_algorithm2(data: Dict, output_path: str,
+                                        title: str = "Algorithm 2: JSE Positive Ratio Over Training"):
+    """
+    Plot Algorithm 2 JSE positive ratio over training epochs.
+
+    Creates a line plot showing the average positive ratio across clients.
+
+    Args:
+        data: Dictionary mapping epoch to {"avg_positive_ratio": float, "client_ratios": [float]}
+        output_path: Output PNG file path
+        title: Plot title
+    """
+    # Extract epochs and positive ratios
+    epochs = []
+    avg_ratios = []
+
+    for epoch_str, epoch_data in sorted(data.items(), key=lambda x: int(x[0])):
+        epochs.append(int(epoch_str))
+        avg_ratios.append(epoch_data.get("avg_positive_ratio", 0.0))
+
+    if not epochs:
+        print("No JSE positive ratio data to plot for Algorithm 2")
+        return
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Plot line
+    ax.plot(epochs, avg_ratios,
+            linewidth=2.5,
+            marker='o',
+            markersize=5,
+            color='#06A77D',
+            label='Average Positive Ratio')
+
+    # Add horizontal line at 50%
+    ax.axhline(y=0.5, color='gray', linestyle='--', linewidth=1.5, alpha=0.5, label='50% Reference')
+
+    # Set labels and title
+    ax.set_xlabel('Global Epoch', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Positive JSE Ratio', fontsize=12, fontweight='bold')
+    ax.set_title(title, fontsize=14, fontweight='bold')
+
+    # Add grid
+    ax.grid(alpha=0.3, linestyle='--', linewidth=0.8)
+
+    # Add legend
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+
+    # Set y-axis limits
+    ax.set_ylim([0, 1.05])
+
+    # Format y-axis as percentage
+    from matplotlib.ticker import PercentFormatter
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0))
+
+    # Tight layout
+    plt.tight_layout()
+
+    # Save figure
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"✓ JSE Positive Ratio plot saved to: {output_path}")
+    plt.close()
+
+
 def get_available_json_files() -> List[str]:
     """
     Search for shrinkage_factors.json files in the output directory.
@@ -233,7 +299,7 @@ def interactive_plot():
 
     # Load data
     print(f"\nLoading: {selected_file}")
-    algorithm_variant, data = load_shrinkage_data(selected_file)
+    algorithm_variant, data, jse_sign_data = load_shrinkage_data(selected_file)
     print(f"Algorithm variant: {algorithm_variant}")
     print(f"Number of epochs: {len(data)}")
 
@@ -248,6 +314,12 @@ def interactive_plot():
     elif algorithm_variant in ["step_noise_step_jse", "step_noise_final_jse"]:
         title = f"Algorithm {'2' if algorithm_variant == 'step_noise_step_jse' else '3'}: Client-side JSE Shrinkage Factors"
         plot_algorithm2_3(data, str(output_path), title=title)
+
+        # Plot JSE positive ratio for algorithm 2
+        if algorithm_variant == "step_noise_step_jse" and jse_sign_data:
+            jse_output_filename = f"jse_positive_ratio_{algorithm_variant}.png"
+            jse_output_path = output_dir / jse_output_filename
+            plot_jse_positive_ratio_algorithm2(jse_sign_data, str(jse_output_path))
     else:
         print(f"Unknown algorithm variant: {algorithm_variant}")
         return

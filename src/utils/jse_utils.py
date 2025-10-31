@@ -111,8 +111,6 @@ class JSEProcessor:
         # if d == 10:
         #     print(f"[JSE] Tensor data (10 elements): {tensor.flatten().tolist()}")
 
-        shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
-
         # Apply shrinkage: result = shrinkage_multiplier * tensor
         return shrinkage_multiplier * tensor, shrinkage_multiplier.item()
 
