@@ -5,7 +5,7 @@
 # NOTE: Please replace ACCOUNT_NAME with your actual Perlmutter project account
 
 # Define variables to make the script more readable and maintainable
-EXPERIMENT_VERSION="dp_scaffstein_last_noise_server_jse_per_layer_jse"
+EXPERIMENT_VERSION="dp_scaffold_last_noise"
 EXPERIMENT_DESCRIPTION="run benchmark for dp_scaffstein_last_noise_server_jse, flat clip norm, per-layer jse"
 
 # Define directory variables
@@ -38,9 +38,9 @@ cat > "${OUTPUT_DIR}/experiment_metadata.md" << EOF
 EOF
 
 # For testing
-config_files=("dp_scaffstein_last_noise_server_jse")
+config_files=("dp_scaffold_last_noise")
 sigma_values=(0.003 0.03 0.3 3.0 30.0)
-lr_values=(2.0 1.0 0.5)
+lr_values=(0.01 0.005 0.001 0.0005 0.0001)
 global_epoch_values=(100)
 local_epoch_values=(5 10 50)
 clip_norm_values=(0.1 1.0 10.0 50.0 100.0)

@@ -126,6 +126,9 @@ class DPScaffSteinServer(DPScaffoldServer):
         global_lr = self.args.dp_scaffstein.global_lr
 
         # Apply global JSE to the aggregated parameter differences
+        # shrinkage_factor = JSEProcessor.apply_global_jse_to_parameter_diff(
+        #     aggregated_diff, noise_variance, k_factor
+        # )
         shrinkage_factor = 1.0
         JSEProcessor.apply_layerwise_jse_to_parameter_diff(
             aggregated_diff, noise_variance, k_factor

@@ -105,7 +105,7 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        print(f"[JSE] apply_jse_shrinkage: shrinkage_multiplier={shrinkage_multiplier:.6f}, norm_sq={tensor_norm_sq:.6f}, elements={d}, mean={tensor_mean:.6f}, std={tensor_std:.6f}, min={tensor_min:.6f}, max={tensor_max:.6f}, add_noise={noise_variance:.6f}")
+        # print(f"[JSE] apply_jse_shrinkage: shrinkage_multiplier={shrinkage_multiplier:.6f}, norm_sq={tensor_norm_sq:.6f}, elements={d}, mean={tensor_mean:.6f}, std={tensor_std:.6f}, min={tensor_min:.6f}, max={tensor_max:.6f}, add_noise={noise_variance:.6f}")
 
         # Print all data for small tensors (e.g., bias with 10 elements)
         # if d == 10:
@@ -180,7 +180,7 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        print(f"[JSE] apply_jse_shrinkage_to_mean: size={tensor_size}, shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, centered_norm_sq={centered_norm_sq:.6f}, elements={d}, zeros={num_zeros}/{total_elements} ({zero_ratio:.2%}), mean={tensor_mean:.6f}, std={tensor_std:.6f}, min={tensor_min:.6f}, max={tensor_max:.6f}, add_noise={noise_variance:.6f}")
+        # print(f"[JSE] apply_jse_shrinkage_to_mean: size={tensor_size}, shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, centered_norm_sq={centered_norm_sq:.6f}, elements={d}, zeros={num_zeros}/{total_elements} ({zero_ratio:.2%}), mean={tensor_mean:.6f}, std={tensor_std:.6f}, min={tensor_min:.6f}, max={tensor_max:.6f}, add_noise={noise_variance:.6f}")
 
         # shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
@@ -281,7 +281,7 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        print(f"[JSE] apply_global_jse_to_gradients: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
+        # print(f"[JSE] apply_global_jse_to_gradients: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
         # shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Step 3: Apply shrinkage to each gradient directly in-place
@@ -310,14 +310,14 @@ class JSEProcessor:
             noise_variance: Noise variance σ² from DP mechanism
             k_factor: Accumulation factor for multi-step scenarios (default: 1)
         """
-        # for key, param_tensor in param_diff_dict.items():
-        #     param_diff_dict[key], _ = JSEProcessor.apply_jse_shrinkage(
-        #         param_tensor, noise_variance, k_factor
-        #     )
         for key, param_tensor in param_diff_dict.items():
-            param_diff_dict[key], _ = JSEProcessor.apply_jse_shrinkage_to_mean(
+            param_diff_dict[key], _ = JSEProcessor.apply_jse_shrinkage(
                 param_tensor, noise_variance, k_factor
             )
+        # for key, param_tensor in param_diff_dict.items():
+        #     param_diff_dict[key], _ = JSEProcessor.apply_jse_shrinkage_to_mean(
+        #         param_tensor, noise_variance, k_factor
+        #     )
 
     @staticmethod
     def apply_global_jse_to_parameter_diff(
@@ -387,7 +387,7 @@ class JSEProcessor:
 
         # Calculate shrinkage multiplier and apply bounds
         shrinkage_multiplier = 1.0 - shrinkage_factor
-        print(f"[JSE] apply_global_jse_to_parameter_diff: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
+        # print(f"[JSE] apply_global_jse_to_parameter_diff: shrinkage_multiplier={shrinkage_multiplier:.6f}, shrinkage_factor={shrinkage_factor:.6f}, norm_sq={total_norm_sq:.6f}, elements={total_elements}, noise_variance={noise_variance:.6f}")
         # shrinkage_multiplier = torch.clamp(shrinkage_multiplier, 0.01, 1.0)
 
         # Step 3: Apply shrinkage to each parameter individually in-place
