@@ -60,6 +60,9 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         # Initialize shrinkage history tracking
         self.shrinkage_history = {}
 
+        # Initialize JSE sign statistics history
+        self.jse_sign_history = {}
+
         # Setup tensorboard custom layout for shrinkage factors
         if self.args.common.monitor == "tensorboard":
             layout = {
@@ -67,7 +70,8 @@ class DPFedSteinServer(DPFedAvgLocalServer):
                     "Statistics": ["Multiline", [
                         "ShrinkageFactor/Client-Min",
                         "ShrinkageFactor/Client-Max",
-                        "ShrinkageFactor/Client-Average"
+                        "ShrinkageFactor/Client-Average",
+                        "ShrinkageFactor/JSE_PositiveRatio"
                     ]],
                     "Server": ["Multiline", ["ShrinkageFactor/Server"]]
                 }
@@ -95,6 +99,10 @@ class DPFedSteinServer(DPFedAvgLocalServer):
 
         # Log shrinkage factors to tensorboard
         self._log_shrinkage_to_tensorboard(client_packages)
+
+        # Record and log JSE sign statistics for variant 2
+        if self.fed_stein_algorithm_variant == FedSteinAlgorithmVariant.STEP_NOISE_STEP_JSE:
+            self._record_jse_sign_statistics(client_packages)
 
     def _aggregate_with_post_jse_variant_1(self, client_packages: OrderedDict[int, Dict[str, Any]]):
         """Aggregate client updates and then apply server-side JSE for variant 1.
@@ -163,6 +171,39 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         if current_epoch_data:
             self.shrinkage_history[self.current_epoch] = current_epoch_data
 
+    def _record_jse_sign_statistics(self, client_packages: Dict[int, Dict[str, Any]]) -> None:
+        """Record JSE sign statistics from client packages for variant 2.
+
+        Extracts JSE positive ratio from each client and computes simple average.
+
+        Args:
+            client_packages: Dictionary mapping client_id to client package data
+        """
+        client_positive_ratios = []
+
+        for client_id, package in client_packages.items():
+            if "jse_positive_ratio" in package:
+                client_positive_ratios.append(package["jse_positive_ratio"])
+
+        if client_positive_ratios:
+            # Simple average of client positive ratios
+            avg_positive_ratio = sum(client_positive_ratios) / len(client_positive_ratios)
+
+            # Store in history
+            self.jse_sign_history[self.current_epoch] = {
+                "avg_positive_ratio": avg_positive_ratio,
+                "client_ratios": client_positive_ratios
+            }
+
+            # Log to tensorboard
+            if self.args.common.monitor == "tensorboard":
+                self.tensorboard.add_scalar(
+                    "ShrinkageFactor/JSE_PositiveRatio",
+                    avg_positive_ratio,
+                    self.current_epoch,
+                    new_style=True
+                )
+
     def _log_shrinkage_to_tensorboard(self, client_packages: Dict[int, Dict[str, Any]]) -> None:
         """Log JSE shrinkage factors to tensorboard.
 
@@ -223,7 +264,7 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         import json
         from pathlib import Path
 
-        if not self.shrinkage_history:
+        if not self.shrinkage_history and not self.jse_sign_history:
             return  # Nothing to save
 
         # Determine algorithm variant name
@@ -239,6 +280,12 @@ class DPFedSteinServer(DPFedAvgLocalServer):
             "algorithm_variant": variant_name,
             "data": {str(k): v for k, v in self.shrinkage_history.items()}
         }
+
+        # Add JSE sign statistics if available
+        if self.jse_sign_history:
+            data["jse_sign_statistics"] = {
+                str(k): v for k, v in self.jse_sign_history.items()
+            }
 
         # Save to JSON file
         output_path = Path(self.output_dir) / "shrinkage_factors.json"
