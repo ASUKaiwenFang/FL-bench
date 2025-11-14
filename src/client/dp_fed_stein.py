@@ -55,6 +55,9 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         # Initialize JSE sign tracking for variant 2
         self.jse_sign_tracker = {'positive': 0, 'negative': 0, 'zero': 0}
 
+        # Read jse_method from dp_fed_stein config
+        self.jse_method = self._get_dp_config_value('jse_method', 'global')
+
 
     def fit(self):
         """Train the model with local differential privacy and JSE enhancement.
@@ -81,11 +84,11 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         self._last_noise_training()
 
 
-    def _compute_clipped_gradients_with_step_jse(self, inputs, targets, add_noise=True):
-        """Compute clipped per-sample gradients with step-wise JSE application.
+    def _compute_clipped_gradients_global_global(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with global clipping and global JSE.
 
         This method implements the complete gradient computation flow:
-        1. Compute per-sample gradients and clip
+        1. Compute per-sample gradients and apply global clipping
         2. Average clipped gradients
         3. Add noise
         4. Apply global JSE
@@ -110,7 +113,7 @@ class DPFedSteinClient(DPFedAvgLocalClient):
 
         # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
         actual_batch_size = per_sample_norms.size(0)
-        self.sigma_dp = self.clip_norm * self.sigma / actual_batch_size
+        self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
 
         # Calculate per-sample clipping factors
         per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
@@ -136,11 +139,7 @@ class DPFedSteinClient(DPFedAvgLocalClient):
 
         # Apply global JSE to gradients
         if add_noise:
-            # shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
-            #     list(self.model.parameters()), self.sigma_dp**2
-            # )
-            shrinkage_factor = 1.0
-            JSEProcessor.apply_layerwise_jse_to_gradients(
+            shrinkage_factor = JSEProcessor.apply_global_jse_to_gradients(
                 list(self.model.parameters()), self.sigma_dp**2
             )
             # Store shrinkage factor
@@ -154,8 +153,84 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             else:
                 self.jse_sign_tracker['zero'] += 1
 
-    def _compute_clipped_gradients_per_layer_with_step_jse(self, inputs, targets, add_noise=True):
-        """Compute per-layer clipped gradients with step-wise global JSE application.
+    def _compute_clipped_gradients_global_per_layer(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with global clipping and per-layer JSE.
+
+        This method implements the complete gradient computation flow:
+        1. Compute per-sample gradients and apply global clipping
+        2. Average clipped gradients
+        3. Add noise
+        4. Apply per-layer JSE
+
+        Args:
+            inputs: Input batch tensor [batch_size, ...]
+            targets: Target batch tensor [batch_size, ...]
+            add_noise: Whether to add Gaussian noise to gradients
+        """
+        # Compute per-sample gradients using parent class method
+        per_sample_grads = compute_per_sample_grads(
+            self.model, inputs, targets, self.criterion,
+            cached_params=self._cached_model_params,
+            cached_buffers=self._cached_model_buffers
+        )
+
+        # Compute per-sample gradient norms
+        per_sample_norms = compute_per_sample_norms(per_sample_grads)
+
+        if len(per_sample_norms) == 0:
+            return
+
+        # Calculate DP noise standard deviation: σ_DP = C * σ_g / b_actual
+        actual_batch_size = per_sample_norms.size(0)
+        self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
+
+        # Calculate per-sample clipping factors
+        per_sample_clip_factor = (self.clip_norm / (per_sample_norms + self.numerical_epsilon)).clamp(max=1.0)
+
+        # Process gradients: clip → mean → add_noise
+        for param_name, per_sample_grad in per_sample_grads.items():
+            # Vectorized clipping using optimized tensor multiplication
+            clip_shape = [actual_batch_size] + [1] * (per_sample_grad.ndim - 1)
+            clipped_grad = per_sample_grad * per_sample_clip_factor.view(clip_shape)
+
+            # Average clipped gradients across batch
+            mean_clipped_grad = clipped_grad.mean(dim=0)
+
+            if add_noise:
+                # Add Gaussian noise to averaged gradient
+                noise = torch.randn_like(mean_clipped_grad, device=self.device) * self.sigma_dp
+                noisy_grad = mean_clipped_grad + noise
+            else:
+                noisy_grad = mean_clipped_grad
+
+            # Set the gradient
+            self._cached_model_params[param_name].grad = noisy_grad
+
+        # Apply per-layer JSE to gradients
+        if add_noise:
+            layer_shrinkage_factors = []
+            for param in self.model.parameters():
+                if param.grad is not None:
+                    param.grad.data, factor = JSEProcessor.apply_jse_shrinkage(
+                        param.grad.data, self.sigma_dp**2
+                    )
+                    layer_shrinkage_factors.append(factor)
+
+            # Store layer shrinkage factors
+            self.shrinkage_factors.append(layer_shrinkage_factors)
+
+            # Track sign based on mean shrinkage factor
+            if len(layer_shrinkage_factors) > 0:
+                mean_factor = sum(layer_shrinkage_factors) / len(layer_shrinkage_factors)
+                if mean_factor > 0:
+                    self.jse_sign_tracker['positive'] += 1
+                elif mean_factor < 0:
+                    self.jse_sign_tracker['negative'] += 1
+                else:
+                    self.jse_sign_tracker['zero'] += 1
+
+    def _compute_clipped_gradients_per_layer_global(self, inputs, targets, add_noise=True):
+        """Compute per-layer clipped gradients with global JSE application.
 
         This method implements per-layer gradient clipping followed by global JSE:
         1. Compute per-sample gradients
@@ -181,7 +256,7 @@ class DPFedSteinClient(DPFedAvgLocalClient):
 
         # Get actual batch size
         actual_batch_size = next(iter(per_sample_grads.values())).size(0)
-        self.sigma_dp = self.clip_norm * self.sigma / actual_batch_size
+        self.sigma_dp = 2 * self.clip_norm * self.sigma / actual_batch_size
 
         # Process each parameter layer independently
         for param_name, per_sample_grad in per_sample_grads.items():
@@ -225,8 +300,8 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             else:
                 self.jse_sign_tracker['zero'] += 1
 
-    def _compute_clipped_gradients_heuristic_with_step_jse(self, inputs, targets, add_noise=True):
-        """Compute clipped per-sample gradients with heuristic median-based clipping and step-wise JSE.
+    def _compute_clipped_gradients_heuristic_per_layer(self, inputs, targets, add_noise=True):
+        """Compute clipped per-sample gradients with heuristic median-based clipping and per-layer JSE.
 
         This method uses a heuristic approach where each parameter layer computes its own
         dynamic clipping threshold (max_norm) based on the median of per-sample gradient norms
@@ -308,8 +383,10 @@ class DPFedSteinClient(DPFedAvgLocalClient):
     def _compute_clipped_gradients_dispatch_with_step_jse(self, inputs, targets, add_noise=True):
         """Dispatch to appropriate gradient clipping method with step-wise JSE.
 
-        Routes to the appropriate clipping strategy based on clip_method:
+        Routes to the appropriate clipping strategy based on clip_method and jse_method:
         - 'global': Global clipping with fixed clip_norm
+          - jse_method='global': Apply global JSE across all parameters
+          - jse_method='per_layer': Apply per-layer JSE independently
         - 'per_layer': Per-layer clipping with fixed clip_norm
         - 'heuristic': Adaptive per-layer clipping using median
 
@@ -319,11 +396,19 @@ class DPFedSteinClient(DPFedAvgLocalClient):
             add_noise: Whether to add Gaussian noise to gradients
         """
         if self.clip_method == 'global':
-            return self._compute_clipped_gradients_with_step_jse(inputs, targets, add_noise)
+            if self.jse_method == 'global':
+                return self._compute_clipped_gradients_global_global(inputs, targets, add_noise)
+            elif self.jse_method == 'per_layer':
+                return self._compute_clipped_gradients_global_per_layer(inputs, targets, add_noise)
+            else:
+                raise ValueError(
+                    f"Unsupported jse_method: {self.jse_method}. "
+                    f"Supported values: 'global', 'per_layer'."
+                )
         elif self.clip_method == 'per_layer':
-            return self._compute_clipped_gradients_per_layer_with_step_jse(inputs, targets, add_noise)
+            return self._compute_clipped_gradients_per_layer_global(inputs, targets, add_noise)
         elif self.clip_method == 'heuristic':
-            return self._compute_clipped_gradients_heuristic_with_step_jse(inputs, targets, add_noise)
+            return self._compute_clipped_gradients_heuristic_per_layer(inputs, targets, add_noise)
         else:
             raise ValueError(
                 f"Unsupported clip_method for JSE: {self.clip_method}. "
@@ -406,6 +491,8 @@ class DPFedSteinClient(DPFedAvgLocalClient):
         if self.fed_stein_algorithm_variant == FedSteinAlgorithmVariant.STEP_NOISE_STEP_JSE:
             # Variant 2: send last local epoch shrinkage
             client_package["shrinkage_factor"] = self.last_local_epoch_shrinkage if self.last_local_epoch_shrinkage is not None else 1.0
+            # Send all local steps shrinkage factors for detailed plotting
+            client_package["shrinkage_factors"] = self.shrinkage_factors if len(self.shrinkage_factors) > 0 else []
             # Add JSE sign statistics
             total_count = sum(self.jse_sign_tracker.values())
             positive_ratio = self.jse_sign_tracker['positive'] / total_count if total_count > 0 else 0.0

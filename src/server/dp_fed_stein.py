@@ -63,6 +63,9 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         # Initialize JSE sign statistics history
         self.jse_sign_history = {}
 
+        # Initialize storage for all shrinkage factors across all rounds
+        self.all_shrinkage_data = {}  # {round: {client_id: [shrinkage_factors]}}
+
         # Setup tensorboard custom layout for shrinkage factors
         if self.args.common.monitor == "tensorboard":
             layout = {
@@ -103,6 +106,11 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         # Record and log JSE sign statistics for variant 2
         if self.fed_stein_algorithm_variant == FedSteinAlgorithmVariant.STEP_NOISE_STEP_JSE:
             self._record_jse_sign_statistics(client_packages)
+
+        # Record all shrinkage factors and plot cumulative figure for variant 2
+        if self.fed_stein_algorithm_variant == FedSteinAlgorithmVariant.STEP_NOISE_STEP_JSE:
+            self._record_all_client_shrinkage_factors(client_packages)
+            self._plot_cumulative_shrinkage_factors()
 
     def _aggregate_with_post_jse_variant_1(self, client_packages: OrderedDict[int, Dict[str, Any]]):
         """Aggregate client updates and then apply server-side JSE for variant 1.
@@ -170,6 +178,72 @@ class DPFedSteinServer(DPFedAvgLocalServer):
 
         if current_epoch_data:
             self.shrinkage_history[self.current_epoch] = current_epoch_data
+
+    def _record_all_client_shrinkage_factors(self, client_packages: Dict[int, Dict[str, Any]]) -> None:
+        """Record all shrinkage factors from all local steps for each client.
+
+        Args:
+            client_packages: Dictionary mapping client_id to client package data
+        """
+        current_round_data = {}
+
+        for client_id, package in client_packages.items():
+            if "shrinkage_factors" in package and len(package["shrinkage_factors"]) > 0:
+                current_round_data[client_id] = package["shrinkage_factors"]
+
+        if current_round_data:
+            self.all_shrinkage_data[self.current_epoch] = current_round_data
+
+    def _plot_cumulative_shrinkage_factors(self) -> None:
+        """Plot cumulative shrinkage factors for all clients across all rounds to TensorBoard.
+
+        Creates a line plot where:
+        - X-axis: global step index = round * local_epoch + local_step
+        - Y-axis: shrinkage factor value
+        - Each line: one client's data in one round (no labels)
+        """
+        if self.args.common.monitor != "tensorboard":
+            return
+
+        if not self.all_shrinkage_data:
+            return
+
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        # Plot data for each round and client
+        for round_idx in sorted(self.all_shrinkage_data.keys()):
+            round_data = self.all_shrinkage_data[round_idx]
+
+            for client_id, shrinkage_factors in round_data.items():
+                # Calculate global step indices
+                local_epoch = len(shrinkage_factors)
+                x_values = [round_idx * local_epoch + step for step in range(local_epoch)]
+
+                # Plot line for this client in this round (no label)
+                ax.plot(x_values, shrinkage_factors,
+                       alpha=0.7, linewidth=1.0)
+
+        # Configure plot
+        ax.set_xlabel('Global Step Index', fontsize=12)
+        ax.set_ylabel('JSE Shrinkage Factor', fontsize=12)
+        ax.set_title('Cumulative JSE Shrinkage Factors - All Selected Clients', fontsize=14)
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        # Add to tensorboard under ShrinkageFactor category
+        self.tensorboard.add_figure(
+            'ShrinkageFactor/All_Clients_Cumulative',
+            fig,
+            global_step=self.current_epoch
+        )
+
+        plt.close(fig)
 
     def _record_jse_sign_statistics(self, client_packages: Dict[int, Dict[str, Any]]) -> None:
         """Record JSE sign statistics from client packages for variant 2.
@@ -264,7 +338,7 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         import json
         from pathlib import Path
 
-        if not self.shrinkage_history and not self.jse_sign_history:
+        if not self.shrinkage_history and not self.jse_sign_history and not self.all_shrinkage_data:
             return  # Nothing to save
 
         # Determine algorithm variant name
@@ -275,16 +349,19 @@ class DPFedSteinServer(DPFedAvgLocalServer):
         }
         variant_name = variant_names.get(self.fed_stein_algorithm_variant, "unknown")
 
-        # Prepare data structure
+        # Prepare data structure with only all_shrinkage_data
         data = {
             "algorithm_variant": variant_name,
-            "data": {str(k): v for k, v in self.shrinkage_history.items()}
         }
 
-        # Add JSE sign statistics if available
-        if self.jse_sign_history:
-            data["jse_sign_statistics"] = {
-                str(k): v for k, v in self.jse_sign_history.items()
+        # Add all shrinkage factors data if available
+        if self.all_shrinkage_data:
+            data["all_shrinkage_data"] = {
+                str(round_idx): {
+                    f"client_{client_id}": factors
+                    for client_id, factors in round_data.items()
+                }
+                for round_idx, round_data in self.all_shrinkage_data.items()
             }
 
         # Save to JSON file
