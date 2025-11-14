@@ -5,8 +5,8 @@
 # NOTE: Please replace ACCOUNT_NAME with your actual Perlmutter project account
 
 # Define variables to make the script more readable and maintainable
-EXPERIMENT_VERSION="dp_scaffold_last_noise"
-EXPERIMENT_DESCRIPTION="run benchmark for dp_scaffstein_last_noise_server_jse, flat clip norm, per-layer jse"
+EXPERIMENT_VERSION="dp_fedavg_step_noise_test"
+EXPERIMENT_DESCRIPTION="run benchmark for dp_fedavg_step_noise, heuristic clip method"
 
 # Define directory variables
 OUTPUT_DIR="experiments/${EXPERIMENT_VERSION}"
@@ -38,15 +38,24 @@ cat > "${OUTPUT_DIR}/experiment_metadata.md" << EOF
 EOF
 
 # For testing
-config_files=("dp_scaffold_last_noise")
-sigma_values=(0.003 0.03 0.3 3.0 30.0)
-lr_values=(0.01 0.005 0.001 0.0005 0.0001)
-global_epoch_values=(100)
-local_epoch_values=(5 10 50)
-clip_norm_values=(0.1 1.0 10.0 50.0 100.0)
-clip_method_values=("global")
-data_sample_ratio_values=(0.1 0.2 0.5)
+# config_files=("dp_fedavg_step_noise")
+# sigma_values=(3.0)
+# lr_values=(0.1)
+# global_epoch_values=(100)
+# local_epoch_values=(5)
+# clip_norm_values=(10.0)
+# clip_method_values=("heuristic")
+# data_sample_ratio_values=(0.2)
 
+# For testing
+config_files=("dp_fedavg_step_noise")
+sigma_values=(0.3 3.0)
+lr_values=(0.001 0.01 0.1 1.0 10.0 100.0 1000.0 10000.0)
+global_epoch_values=(100)
+local_epoch_values=(5 50)
+clip_norm_values=(1.0 10.0 100.0)
+clip_method_values=("heuristic")
+data_sample_ratio_values=(0.1 0.2 0.5)
 
 # For full experiment
 # config_files=("dp_fedavg_step_noise" "dp_fedavg_last_noise" "dp_scaffold_step_noise" "dp_scaffold_last_noise" "dp_fedstein_step_noise_step_jse" "dp_fedstein_step_noise_final_jse" "dp_fedstein_last_noise_server_jse" "dp_scaffstein_step_noise_step_jse" "dp_scaffstein_step_noise_final_jse" "dp_scaffstein_last_noise_server_jse")
