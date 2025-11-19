@@ -47,3 +47,7 @@ partition_md5.txt
 *.json
 *.png
 *.pt
+
+.venv/
+experiments/
+CLAUDE.md
