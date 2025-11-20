@@ -5,6 +5,7 @@ All parameter mapping and model compatibility is handled by the server.
 import logging
 from copy import deepcopy
 from typing import Any
+from utils.metrics import Metrics
 
 import torch
 
@@ -29,16 +30,28 @@ class DPFedAvgClient(FedAvgClient):
     def set_parameters(self, package: dict[str, Any]):
         """Set parameters and setup DP training."""
         self.dp_config = package["dp_config"]
+
+        # Force reset Privacy Engine to avoid cross-client sharing
+        self._reset_privacy_engine()
+
+        # IMPORTANT: Load data indices BEFORE setting up DP
+        # This ensures DPDataLoader is created with the correct dataset size
+        super().set_parameters(package)
+
+        # Now setup DP training with the correct trainloader
         self._setup_dp_training()
 
-        # Call parent set_parameters
-        super().set_parameters(package)
+    def _reset_privacy_engine(self):
+        """Reset Privacy Engine state to ensure client isolation"""
+        if self.privacy_engine is not None:
+            # Clean up old privacy engine
+            self.privacy_engine = None
+        # Reset privacy_stats (noise_multiplier will be set again in setup)
+        self.privacy_stats = DPManager.create_privacy_stats_dict()
 
     def _setup_dp_training(self):
         """Setup DP training with provided configuration."""
-        # Skip if already setup
-        if self.privacy_engine is not None:
-            return
+        # Note: Always reinitialize because _reset_privacy_engine() cleared old state
 
         # Use noise multiplier calculated by server
         noise_multiplier = self.dp_config["noise_multiplier"]
@@ -64,62 +77,70 @@ class DPFedAvgClient(FedAvgClient):
         if self.args.common.buffers == "local":
             self.personal_params_name = [name for name, _ in underlying_model.named_buffers()]
 
-        logging.info(f"DP training setup complete for client {self.client_id}. "
-                    f"ε={self.dp_config['epsilon']}, δ={self.dp_config['delta']}, "
-                    f"noise_multiplier={noise_multiplier:.3f}, accountant={accountant}")
+        # Log DP training setup completion
+        sample_rate = self.trainloader.sample_rate
 
-    def _sample_single_batch_with_poisson(self):
-        """Generate a single batch using Poisson sampling"""
-        sample_rate = self.dp_config["sample_rate"]
-
-        sampler = UniformWithReplacementSampler(
-            num_samples=len(self.trainset),
-            sample_rate=sample_rate,
-            steps=1
-        )
-
-        from torch.utils.data import DataLoader
-        temp_loader = DataLoader(self.trainset, batch_sampler=sampler)
-        batch = next(iter(temp_loader))
-        return batch
 
     def fit(self):
-        """DP training implementation with single batch sampling per epoch."""
+        """DP training implementation using standard DPDataLoader iteration."""
         self.model.train()
         self.dataset.train()
 
-        steps_before = self.privacy_stats["steps_taken"]
+        # Record accountant state before training
+        accountant_steps_before = len(self.privacy_engine.accountant.history)
 
+        total_steps = 0
+
+        # Standard training loop: iterate through DPDataLoader for each epoch
         for epoch in range(self.local_epoch):
-            # Sample single batch using Poisson sampling
-            x, y = self._sample_single_batch_with_poisson()
+            epoch_loss = 0.0
+            epoch_steps = 0
 
-            x, y = x.to(self.device), y.to(self.device)
+            # Use DPDataLoader iteration (Opacus handles Poisson sampling automatically)
+            for x, y in self.trainloader:
+                x, y = x.to(self.device), y.to(self.device)
 
-            # Forward pass
-            logit = self.model(x)
-            loss = self.criterion(logit, y)
+                # Forward pass
+                logit = self.model(x)
+                loss = self.criterion(logit, y)
 
-            # Backward pass with DP
-            # The DP optimizer automatically handles:
-            # 1. Per-sample gradient computation
-            # 2. Gradient clipping
-            # 3. Noise addition
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+                # Backward pass with DP
+                # DPOptimizer automatically handles:
+                # 1. Per-sample gradient computation
+                # 2. Gradient clipping
+                # 3. Noise addition
+                # 4. Calling accountant.step()
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
 
-            self.privacy_stats["steps_taken"] += 1
+                epoch_loss += loss.item()
+                epoch_steps += 1
+                total_steps += 1
 
-            # Update learning rate if scheduler is available
-            if self.lr_scheduler is not None:
-                self.lr_scheduler.step()
+                # Update learning rate if scheduler is available
+                if self.lr_scheduler is not None:
+                    self.lr_scheduler.step()
 
-        # Update privacy statistics
+        # Update steps_taken in privacy_stats (for client's own record)
+        self.privacy_stats["steps_taken"] = total_steps
+
+        # Update privacy statistics from accountant
         self._update_privacy_stats()
 
-        steps_taken = self.privacy_stats["steps_taken"] - steps_before
-        logging.debug(f"Client {self.client_id}: Completed {steps_taken} DP training steps")
+        # Verify accountant state and explain if steps don't match
+        # accountant_steps_after = len(self.privacy_engine.accountant.history)
+        # accountant_steps_added = accountant_steps_after - accountant_steps_before
+
+        # if total_steps != accountant_steps_added:
+        #     epsilon_after = self.privacy_engine.accountant.get_epsilon(delta=self.dp_config["delta"])
+            # logging.info(
+            #     f"[INFO] Privacy accounting: {total_steps} batches processed, "
+            #     f"but {accountant_steps_added} accountant steps recorded. "
+            #     f"This is EXPECTED due to Opacus gradient accumulation mechanism - "
+            #     f"multiple batches are recorded as a single logical step. "
+            #     f"Epsilon calculation (ε={epsilon_after:.4f}) remains correct."
+            # )
 
     def _update_privacy_stats(self):
         """Update privacy budget consumption statistics."""
@@ -128,6 +149,7 @@ class DPFedAvgClient(FedAvgClient):
             epsilon_spent = accountant.get_epsilon(delta=self.dp_config["delta"])
             if not (epsilon_spent != epsilon_spent):  # Check for NaN
                 self.privacy_stats["epsilon_spent"] = epsilon_spent
+                self.privacy_stats["accountant_steps"] = len(accountant.history)
 
     def package(self):
         """Package client data including privacy statistics."""
@@ -135,7 +157,7 @@ class DPFedAvgClient(FedAvgClient):
         model_params = self.model._module.state_dict()
 
         # Create the package manually to handle DP model parameters
-        client_package = dict(
+        client_package = dict[str, int | dict[str, dict[str, Metrics]]](
             weight=len(self.trainset),
             eval_results=self.eval_results,
             regular_model_params={
@@ -158,7 +180,7 @@ class DPFedAvgClient(FedAvgClient):
         if self.return_diff:
             client_package["model_params_diff"] = {
                 key: param_old - param_new
-                for (key, param_new), param_old in zip(
+                for (key, param_new), param_old in zip[tuple[tuple[str, dict[str, Metrics]], Any]](
                     client_package["regular_model_params"].items(),
                     self.regular_model_params.values(),
                 )
@@ -170,11 +192,11 @@ class DPFedAvgClient(FedAvgClient):
 
         # Log privacy consumption
         eps_spent = self.privacy_stats["epsilon_spent"]
-        if eps_spent > 0:
-            privacy_remaining = max(0, self.dp_config["epsilon"] - eps_spent)
-            logging.info(f"Client {self.client_id}: Privacy budget consumed: "
-                       f"{eps_spent:.4f}/{self.dp_config['epsilon']:.4f} (ε), "
-                       f"remaining: {privacy_remaining:.4f}")
+        # if eps_spent > 0:
+        #     privacy_remaining = max(0, self.dp_config["epsilon"] - eps_spent)
+            # logging.info(f"Client {self.client_id}: Privacy budget consumed: "
+            #            f"{eps_spent:.4f}/{self.dp_config['epsilon']:.4f} (ε), "
+            #            f"remaining: {privacy_remaining:.4f}")
 
         return client_package
 

@@ -35,19 +35,28 @@ class DPManager:
             "epsilon_spent": 0.0,
             "delta_spent": 0.0,
             "noise_multiplier": 0.0,
-            "steps_taken": 0
+            "rounds_completed": 0,  # Track completed rounds instead of total steps
+            "max_client_epsilon": 0.0,  # Track maximum client epsilon
         }
 
-        logging.info(f"DPManager initialized with ε={self.epsilon}, δ={self.delta}")
+        # Per-client cumulative epsilon tracking
+        self.client_epsilon_cumulative = {}  # {client_id: cumulative_epsilon}
+
+        logging.info(
+            f"🔒 DPManager initialized: Target privacy budget ε={self.epsilon}, δ={self.delta}\n"
+            f"   Privacy tracking: Using max(client_epsilon) for parallel training\n"
+            f"   Accounting: {getattr(self.dp_config, 'privacy_accountant', 'rdp').upper()} accountant"
+        )
 
     @staticmethod
     def create_privacy_stats_dict() -> Dict[str, Any]:
-        """Create standardized privacy statistics dictionary structure."""
+        """Create standardized privacy statistics dictionary structure for clients."""
         return {
             "epsilon_spent": 0.0,
             "delta_spent": 0.0,
             "noise_multiplier": 0.0,
-            "steps_taken": 0
+            "steps_taken": 0,  # Client tracks its own processed steps
+            "accountant_steps": 0  # Client tracks accountant's actual steps
         }
 
     def prepare_model_for_dp(self, model: torch.nn.Module) -> torch.nn.Module:
@@ -74,10 +83,8 @@ class DPManager:
         # Calculate effective sample_rate
         if self.sample_rate > 0:
             effective_sample_rate = min(0.99, self.sample_rate)
-            logging.debug(f"Using configured sample_rate={effective_sample_rate:.3f}")
         else:
             effective_sample_rate = min(0.99, batch_size / dataset_size)
-            logging.debug(f"Calculated sample_rate={effective_sample_rate:.3f} from batch_size={batch_size}, dataset_size={dataset_size}")
 
         # Calculate noise_multiplier if not provided
         if self.noise_multiplier is None:
@@ -89,10 +96,8 @@ class DPManager:
                 steps=steps,
                 accountant=accountant
             )
-            logging.debug(f"Calculated noise_multiplier={effective_noise_multiplier:.3f} for sample_rate={effective_sample_rate:.3f}, steps={steps}, accountant={accountant}")
         else:
             effective_noise_multiplier = self.noise_multiplier
-            logging.debug(f"Using configured noise_multiplier={effective_noise_multiplier:.3f}")
 
         return {
             "epsilon": self.epsilon,
@@ -103,15 +108,44 @@ class DPManager:
             "privacy_accountant": getattr(self.dp_config, 'privacy_accountant', 'rdp')
         }
 
-    def update_privacy_stats(self, client_privacy_stats: Dict[str, Any]):
-        """Update global privacy statistics from client reports."""
+    def update_privacy_stats(self, client_id: int, client_privacy_stats: Dict[str, Any]):
+        """Update global privacy statistics from client reports with cumulative tracking.
+
+        Args:
+            client_id: The ID of the client reporting privacy stats
+            client_privacy_stats: Privacy statistics from the client's current round
+        """
         if client_privacy_stats:
-            # Take the maximum privacy consumption across clients
-            self.privacy_stats["epsilon_spent"] = max(
-                self.privacy_stats["epsilon_spent"],
-                client_privacy_stats.get("epsilon_spent", 0.0)
-            )
-            self.privacy_stats["steps_taken"] += client_privacy_stats.get("steps_taken", 0)
+            # Get epsilon from this round's training
+            round_epsilon = client_privacy_stats.get("epsilon_spent", 0.0)
+
+            # Accumulate epsilon for this client across rounds
+            if client_id not in self.client_epsilon_cumulative:
+                self.client_epsilon_cumulative[client_id] = 0.0
+
+            self.client_epsilon_cumulative[client_id] += round_epsilon
+
+            # Global epsilon is the maximum across all clients (parallel composition)
+            max_epsilon = max(self.client_epsilon_cumulative.values()) if self.client_epsilon_cumulative else 0.0
+
+            if max_epsilon > self.privacy_stats["epsilon_spent"]:
+                self.privacy_stats["epsilon_spent"] = max_epsilon
+                self.privacy_stats["max_client_epsilon"] = max_epsilon
+
+    def increment_round(self):
+        """Increment round counter after each training round."""
+        self.privacy_stats["rounds_completed"] += 1
+
+    def get_client_epsilon(self, client_id: int) -> float:
+        """Get cumulative epsilon for a specific client.
+
+        Args:
+            client_id: The ID of the client
+
+        Returns:
+            float: Cumulative epsilon spent by this client across all rounds
+        """
+        return self.client_epsilon_cumulative.get(client_id, 0.0)
 
     def get_privacy_report(self) -> Dict[str, Any]:
         """Generate comprehensive privacy report."""
@@ -123,7 +157,7 @@ class DPManager:
             "epsilon_spent": self.privacy_stats["epsilon_spent"],
             "epsilon_remaining": epsilon_remaining,
             "privacy_exhausted": epsilon_remaining <= 0.01,  # Nearly exhausted
-            "total_steps": self.privacy_stats["steps_taken"],
+            "rounds_completed": self.privacy_stats["rounds_completed"],  # Track rounds instead of steps
             "noise_multiplier": self.privacy_stats["noise_multiplier"]
         }
 

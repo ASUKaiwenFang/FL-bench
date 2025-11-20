@@ -21,16 +21,14 @@ model:
 optimizer:
   name: sgd
   lr: 0.01
-  momentum: 0.9
-  weight_decay: 0.0001
 
 # Common training parameters adjusted for DP
 common:
   # Reduced parameters for initial DP testing
   global_epoch: 50
-  local_epoch: 2
+  local_epoch: 5
   batch_size: 64  # Larger batch size often helps with DP utility
-  join_ratio: 0.1
+  join_ratio: 0.2
 
   # Enable client-side evaluation to monitor DP impact
   client_side_evaluation: true
@@ -64,12 +62,18 @@ dpfedavg:
   max_grad_norm: 1.0             # Maximum L2 norm for gradient clipping
 
   # Noise parameters
-  noise_multiplier: 10         # If null, will be auto-calculated
+  noise_multiplier: 30         # If null, will be auto-calculated
 
   # Sampling parameters
   sample_rate: 0.2              # Poisson sampling rate (0, 1). If negative, calculated from batch_size/dataset_size
 
   privacy_accountant: "rdp"      # Privacy accounting method: "rdp", "gdp", "prv"
+
+  # Advanced options (optional)
+  # secure_mode: true           # Use cryptographically secure RNG (slower but more secure)
+                                 # Set to true for production, false for experiments (default: false)
+  # rdp_alpha_max: 32            # Maximum alpha for RDP accountant (larger = tighter bound, default: 32)
+                                 # Increase to 64 or 128 if you see "Optimal order is the largest alpha" warning
 
 # Monitoring configuration - useful for observing DP impact
 monitor: tensorboard

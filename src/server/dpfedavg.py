@@ -74,10 +74,10 @@ class DPFedAvgServer(FedAvgServer):
 
     def aggregate_client_updates(self, client_packages: OrderedDict[int, Dict[str, Any]]):
         """Aggregate client updates with DP parameter name handling."""
-        # Update privacy statistics
-        for package in client_packages.values():
+        # Update privacy statistics with client_id for cumulative tracking
+        for client_id, package in client_packages.items():
             if "privacy_stats" in package:
-                self.dp_manager.update_privacy_stats(package["privacy_stats"])
+                self.dp_manager.update_privacy_stats(client_id, package["privacy_stats"])
 
         # Check privacy budget
         budget_ok, budget_msg = self.dp_manager.validate_privacy_budget()
@@ -91,17 +91,45 @@ class DPFedAvgServer(FedAvgServer):
         # Update the DP model with aggregated parameters (already in DP format)
         self.model.load_state_dict(self.public_model_params, strict=False)
 
+        # Record completed training round
+        self.dp_manager.increment_round()
+
     def display_metrics(self):
         """Display metrics including privacy information."""
         super().display_metrics()
 
-        # Display privacy statistics
+        # Display privacy statistics with enhanced information
         if self.verbose:
             privacy_report = self.dp_manager.get_privacy_report()
+
+            # Calculate percentage used
+            epsilon_percentage = (privacy_report['epsilon_spent'] / privacy_report['target_epsilon']) * 100
+
+            # Status indicator
+            if epsilon_percentage >= 100:
+                status_icon = "🔴"
+                status_text = "BUDGET EXHAUSTED"
+            elif epsilon_percentage >= 90:
+                status_icon = "🟡"
+                status_text = "WARNING"
+            elif epsilon_percentage >= 50:
+                status_icon = "🟢"
+                status_text = "OK"
+            else:
+                status_icon = "🟢"
+                status_text = "GOOD"
+
+            # Get max client epsilon for additional info
+            max_client_id = max(self.dp_manager.client_epsilon_cumulative.items(),
+                              key=lambda x: x[1])[0] if self.dp_manager.client_epsilon_cumulative else None
+
+            client_info = f", max_client={max_client_id}" if max_client_id is not None else ""
+
             self.logger.log(
-                f"Privacy Status: ε={privacy_report['epsilon_spent']:.4f}/{privacy_report['target_epsilon']:.1f}, "
+                f"{status_icon} Privacy: ε={privacy_report['epsilon_spent']:.4f}/{privacy_report['target_epsilon']:.1f} "
+                f"({epsilon_percentage:.1f}% used), "
                 f"remaining={privacy_report['epsilon_remaining']:.4f}, "
-                f"steps={privacy_report['total_steps']}"
+                f"rounds={privacy_report['rounds_completed']}{client_info} [{status_text}]"
             )
 
     @staticmethod
