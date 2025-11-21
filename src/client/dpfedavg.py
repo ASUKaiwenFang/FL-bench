@@ -2,17 +2,14 @@
 Simplified DP-FedAvg client that only handles DP training.
 All parameter mapping and model compatibility is handled by the server.
 """
-import logging
 from copy import deepcopy
 from typing import Any
-from utils.metrics import Metrics
 
 import torch
 
 from src.client.fedavg import FedAvgClient
-
+from src.utils.metrics import Metrics
 from opacus import PrivacyEngine
-from opacus.data_loader import UniformWithReplacementSampler
 from src.utils.dp_manager import DPManager
 
 
@@ -27,6 +24,9 @@ class DPFedAvgClient(FedAvgClient):
         # Privacy tracking - use standardized structure
         self.privacy_stats = DPManager.create_privacy_stats_dict()
 
+        # Store reference to original trainloader for DP wrapping
+        self.original_trainloader = None
+
     def set_parameters(self, package: dict[str, Any]):
         """Set parameters and setup DP training."""
         self.dp_config = package["dp_config"]
@@ -37,6 +37,16 @@ class DPFedAvgClient(FedAvgClient):
         # IMPORTANT: Load data indices BEFORE setting up DP
         # This ensures DPDataLoader is created with the correct dataset size
         super().set_parameters(package)
+
+        # Save original trainloader before DP wrapping (to avoid recursive collate_fn wrapping)
+        if self.original_trainloader is None:
+            from torch.utils.data import DataLoader
+            # Create a fresh DataLoader with same configuration as parent class
+            self.original_trainloader = DataLoader(
+                self.trainset,
+                batch_size=self.args.common.batch_size,
+                shuffle=True
+            )
 
         # Now setup DP training with the correct trainloader
         self._setup_dp_training()
@@ -61,10 +71,11 @@ class DPFedAvgClient(FedAvgClient):
         self.privacy_engine = PrivacyEngine(accountant=accountant)
 
         # Make model, optimizer, and data loader private
+        # IMPORTANT: Use original_trainloader to avoid recursive collate_fn wrapping
         self.model, self.optimizer, self.trainloader = self.privacy_engine.make_private(
             module=self.model,
             optimizer=self.optimizer,
-            data_loader=self.trainloader,
+            data_loader=self.original_trainloader,
             noise_multiplier=noise_multiplier,
             max_grad_norm=self.dp_config["max_grad_norm"],
         )
@@ -77,22 +88,16 @@ class DPFedAvgClient(FedAvgClient):
         if self.args.common.buffers == "local":
             self.personal_params_name = [name for name, _ in underlying_model.named_buffers()]
 
-        # Log DP training setup completion
-        sample_rate = self.trainloader.sample_rate
-
 
     def fit(self):
         """DP training implementation using standard DPDataLoader iteration."""
         self.model.train()
         self.dataset.train()
 
-        # Record accountant state before training
-        accountant_steps_before = len(self.privacy_engine.accountant.history)
-
         total_steps = 0
 
         # Standard training loop: iterate through DPDataLoader for each epoch
-        for epoch in range(self.local_epoch):
+        for _ in range(self.local_epoch):
             epoch_loss = 0.0
             epoch_steps = 0
 
@@ -189,14 +194,6 @@ class DPFedAvgClient(FedAvgClient):
 
         # Add privacy statistics
         client_package["privacy_stats"] = deepcopy(self.privacy_stats)
-
-        # Log privacy consumption
-        eps_spent = self.privacy_stats["epsilon_spent"]
-        # if eps_spent > 0:
-        #     privacy_remaining = max(0, self.dp_config["epsilon"] - eps_spent)
-            # logging.info(f"Client {self.client_id}: Privacy budget consumed: "
-            #            f"{eps_spent:.4f}/{self.dp_config['epsilon']:.4f} (ε), "
-            #            f"remaining: {privacy_remaining:.4f}")
 
         return client_package
 
