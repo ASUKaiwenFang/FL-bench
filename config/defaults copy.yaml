@@ -3,6 +3,7 @@
 # the defaults can be found in src/utils/constants.py
 
 # The method name must be identical to the file name in src/server/<method>.py
+# method: scaffold
 method: fedavg
 
 dataset:
@@ -12,7 +13,7 @@ dataset:
   name: cifar10
 
 model:
-  name: avgcnn
+  name: 2nn
 
   # Whether to use torchvision integrated model weights.
   # Has no effect if model is lenet5, 2nn or fedavgcnn
@@ -76,7 +77,7 @@ parallel:
 
 common:
   seed: 42 # Random seed of the run.
-  join_ratio: 0.1 # Ratio for (client each round) / (client num in total).
+  join_ratio: 0.2 # Ratio for (client each round) / (client num in total).
   global_epoch: 100 # Number of global epochs, also called communication round.
   local_epoch: 5 # Number if epochs of client local training.
   batch_size: 32 # Data batch size for client local training.
@@ -104,9 +105,9 @@ common:
     # For example, Set client.test as true to evaluate on local testsets from selected clients with client local models.
     # Frequency is set by `client.interval`. Negative value for disabling.
     client:
-      interval: 100
+      interval: 1
       finetune_epoch: 0 # Number of epochs for clients fine-tunning their models before testing.
-      train: false
+      train: true
       val: false
       test: true
     # For example, set server.test as true to evaluate on a centralized testset (created by aggregating all clients' local testsets)
@@ -114,15 +115,15 @@ common:
     # Frequency is set by `server.interval`. Negative value for disabling.
     # NOTE: If clients have personalized model parameters like local buffers or classifiers, centralized evaluation for the global model is disabled.
     server:
-      interval: -1
-      train: false
+      interval: 1
+      train: true
       val: false
-      test: false
+      test: true
       # Whether to evaluate the global model in train mode or eval mode.
       # Evaluating in train mode allows to get better batchnorm statistics, but is dependent on the order of the data.
       model_in_train_mode: false
 
-  verbose_gap: 10 # Interval round of displaying clients training performance on terminal.
+  verbose_gap: 1 # Interval round of displaying clients training performance on terminal.
   monitor: null # [null, visdom, tensorboard]
   use_cuda: true # Whether to use cuda for training.
 

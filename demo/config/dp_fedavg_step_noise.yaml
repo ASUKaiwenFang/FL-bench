@@ -15,25 +15,25 @@ method: dp_fedavg_local
 
 # Model settings
 model:
-  name: 2nn
+  name: avgcnn
 
 # Training settings
 common:
   seed: 42
   join_ratio: 0.2
   global_epoch: 100
-  local_epoch: 50
+  local_epoch: 5
   batch_size: 32
   monitor: tensorboard
 
 # DP-FedAvg specific parameters - Step Noise Variant
 dp_fedavg_local:
   algorithm_variant: "step_noise"  # Gradient-level noise addition
-  clip_method: "heuristic"            # Clipping method: global, heuristic, per_layer
-  clip_norm: 1.0                   # Gradient clipping threshold
-  sigma: 30.0                      # Noise standard deviation parameter
+  clip_method: "global"            # Clipping method: global, heuristic, per_layer
+  clip_norm: 33.2                   # Gradient clipping threshold
+  sigma: 0.7228915663                      # Noise standard deviation parameter
   data_sample_ratio: 0.2           # Data sampling ratio (0.2 = 20% of trainset)
 
 optimizer:
   name: sgd # [sgd, adam, adamw, rmsprop, adagrad]
-  lr: 0.001
+  lr: 0.01

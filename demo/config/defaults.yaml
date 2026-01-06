@@ -10,7 +10,7 @@ dataset:
   # [mnist, cifar10, cifar100, emnist, fmnist, femnist, medmnist,
   # medmnistA, medmnistC, covid19, celeba, synthetic, svhn,
   # tiny_imagenet, cinic10, domain]
-  name: mnist
+  name: cifar10
 
 model:
   name: nn1
