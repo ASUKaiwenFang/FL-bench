@@ -8,9 +8,8 @@
 - [New Algorithms Implemented](#new-algorithms-implemented)
 - [Algorithm Variants Explanation](#algorithm-variants-explanation)
 - [Detailed File Changes](#detailed-file-changes)
-- [Key Technical Features](#key-technical-features)
 - [New Directory Structure](#new-directory-structure)
-- [References](#references)
+
 
 ---
 
