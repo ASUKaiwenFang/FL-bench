@@ -1,8 +1,10 @@
 FROM ubuntu:24.04
 
-RUN add-apt-repository ppa:deadsnakes/ppa && \
+RUN apt update && \
+    apt install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
     apt update && \
-    apt install git python3.13 python3-pip -y && \
+    apt install -y git python3.13 python3-pip && \
     cd /usr/bin && \
     ln -sf python3.13 python && \
     ln -sf python3.13 python3
