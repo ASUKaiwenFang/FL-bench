@@ -11,8 +11,7 @@ RUN apt update && \
 
 COPY ./ /root/FL-bench
 
-RUN pip install --upgrade pip && \
-    pip install -r /root/FL-bench/.env/requirements.txt
+RUN pip install -r /root/FL-bench/.env/requirements.txt
 
 WORKDIR /root
 
