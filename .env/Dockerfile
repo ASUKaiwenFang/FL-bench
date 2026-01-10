@@ -1,6 +1,7 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
-RUN apt update && \
+RUN add-apt-repository ppa:deadsnakes/ppa && \
+    apt update && \
     apt install git python3.13 python3-pip -y && \
     cd /usr/bin && \
     ln -sf python3.13 python && \
