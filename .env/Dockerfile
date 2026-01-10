@@ -1,9 +1,10 @@
 FROM ubuntu:22.04
 
 RUN apt update && \
-    apt install git python3.10 python3-pip -y && \
+    apt install git python3.13 python3-pip -y && \
     cd /usr/bin && \
-    ln -s python3.10 python
+    ln -sf python3.13 python && \
+    ln -sf python3.13 python3
 
 COPY ./ /root/FL-bench
 
