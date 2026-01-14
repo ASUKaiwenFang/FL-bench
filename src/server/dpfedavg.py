@@ -1,3 +1,4 @@
+import math
 from argparse import ArgumentParser, Namespace
 from collections import OrderedDict
 from typing import Any, Dict
@@ -53,11 +54,14 @@ class DPFedAvgServer(FedAvgServer):
         batch_size = self.args.common.batch_size
         local_epoch = self.args.common.local_epoch
 
+        # Calculate actual trainloader length (batches per epoch) for this client
+        trainloader_length = math.ceil(client_dataset_size / batch_size)
+
         base_package["dp_config"] = self.dp_manager.get_dp_config_for_client(
             batch_size=batch_size,
             dataset_size=client_dataset_size,
             local_epoch=local_epoch,
-            trainloader_length=1  # Poisson sampling: 1 batch per epoch
+            trainloader_length=trainloader_length
         )
         return base_package
 
@@ -145,6 +149,10 @@ class DPFedAvgServer(FedAvgServer):
                           help="Noise multiplier (if None, will be auto-calculated)")
         parser.add_argument("--privacy_accountant", type=str, default="rdp", choices=["rdp", "gdp", "prv"],
                           help="Privacy accounting method")
-        parser.add_argument("--auto_noise_multiplier", type=bool, default=True,
-                          help="Whether to automatically calculate noise multiplier")
+        parser.add_argument("--sample_rate", type=float, default=-1.0,
+                          help="Poisson sampling rate. If negative, calculated from batch_size/dataset_size")
+        parser.add_argument("--secure_mode", type=bool, default=False,
+                          help="Use cryptographically secure RNG (slower but more secure)")
+        parser.add_argument("--rdp_alpha_max", type=int, default=64,
+                          help="Maximum alpha for RDP accountant (larger = tighter bound)")
         return parser.parse_args(args_list)

@@ -29,6 +29,8 @@ class DPManager:
         self.max_grad_norm = self.dp_config.max_grad_norm
         self.noise_multiplier = getattr(self.dp_config, 'noise_multiplier', None)
         self.sample_rate = getattr(self.dp_config, 'sample_rate', -1.0)
+        self.secure_mode = getattr(self.dp_config, 'secure_mode', False)
+        self.rdp_alpha_max = getattr(self.dp_config, 'rdp_alpha_max', 64)
 
         # Privacy tracking
         self.privacy_stats = {
@@ -88,8 +90,8 @@ class DPManager:
 
         # Calculate noise_multiplier if not provided
         if self.noise_multiplier is None:
-            # For Poisson sampling implementation: each epoch = 1 step (1 sampled batch)
-            steps = local_epoch
+            # Total training steps = epochs × batches per epoch
+            steps = local_epoch * trainloader_length
             accountant = getattr(self.dp_config, 'privacy_accountant', 'rdp')
             effective_noise_multiplier = self.calculate_noise_multiplier(
                 sample_rate=effective_sample_rate,
@@ -105,7 +107,9 @@ class DPManager:
             "max_grad_norm": self.max_grad_norm,
             "noise_multiplier": effective_noise_multiplier,
             "sample_rate": effective_sample_rate,
-            "privacy_accountant": getattr(self.dp_config, 'privacy_accountant', 'rdp')
+            "privacy_accountant": getattr(self.dp_config, 'privacy_accountant', 'rdp'),
+            "secure_mode": self.secure_mode,
+            "rdp_alpha_max": self.rdp_alpha_max
         }
 
     def update_privacy_stats(self, client_id: int, client_privacy_stats: Dict[str, Any]):

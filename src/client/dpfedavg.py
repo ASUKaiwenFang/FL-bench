@@ -66,9 +66,12 @@ class DPFedAvgClient(FedAvgClient):
         # Use noise multiplier calculated by server
         noise_multiplier = self.dp_config["noise_multiplier"]
 
-        # Initialize Privacy Engine with correct accountant
-        accountant = self.dp_config.get("privacy_accountant", "rdp")
-        self.privacy_engine = PrivacyEngine(accountant=accountant)
+        # Initialize Privacy Engine with correct accountant and secure mode
+        accountant_type = self.dp_config.get("privacy_accountant", "rdp")
+        secure_mode = self.dp_config.get("secure_mode", False)
+
+        # Create PrivacyEngine with string accountant type (Opacus API requirement)
+        self.privacy_engine = PrivacyEngine(accountant=accountant_type, secure_mode=secure_mode)
 
         # Make model, optimizer, and data loader private
         # IMPORTANT: Use original_trainloader to avoid recursive collate_fn wrapping
