@@ -15,6 +15,27 @@ class DPFedAvgServer(FedAvgServer):
     return_diff = False
     client_cls = DPFedAvgClient
 
+    @staticmethod
+    def get_hyperparams(args_list=None) -> Namespace:
+        parser = ArgumentParser()
+        parser.add_argument("--epsilon", type=float, default=1.0,
+                          help="Privacy budget parameter (smaller = more private)")
+        parser.add_argument("--delta", type=float, default=1e-5,
+                          help="Privacy parameter (should be < 1/dataset_size)")
+        parser.add_argument("--max_grad_norm", type=float, default=1.0,
+                          help="Maximum norm for gradient clipping")
+        parser.add_argument("--noise_multiplier", type=float, default=None,
+                          help="Noise multiplier (if None, will be auto-calculated)")
+        parser.add_argument("--privacy_accountant", type=str, default="rdp", choices=["rdp", "gdp", "prv"],
+                          help="Privacy accounting method")
+        parser.add_argument("--sample_rate", type=float, default=-1.0,
+                          help="Poisson sampling rate. If negative, calculated from batch_size/dataset_size")
+        parser.add_argument("--secure_mode", type=bool, default=False,
+                          help="Use cryptographically secure RNG (slower but more secure)")
+        parser.add_argument("--rdp_alpha_max", type=int, default=64,
+                          help="Maximum alpha for RDP accountant (larger = tighter bound)")
+        return parser.parse_args(args_list)
+
     def __init__(self, args, init_trainer=True, init_model=True):
         # Initialize DP manager first
         self.dp_manager = DPManager(args)
@@ -135,24 +156,3 @@ class DPFedAvgServer(FedAvgServer):
                 f"remaining={privacy_report['epsilon_remaining']:.4f}, "
                 f"rounds={privacy_report['rounds_completed']}{client_info} [{status_text}]"
             )
-
-    @staticmethod
-    def get_hyperparams(args_list=None) -> Namespace:
-        parser = ArgumentParser()
-        parser.add_argument("--epsilon", type=float, default=1.0,
-                          help="Privacy budget parameter (smaller = more private)")
-        parser.add_argument("--delta", type=float, default=1e-5,
-                          help="Privacy parameter (should be < 1/dataset_size)")
-        parser.add_argument("--max_grad_norm", type=float, default=1.0,
-                          help="Maximum norm for gradient clipping")
-        parser.add_argument("--noise_multiplier", type=float, default=None,
-                          help="Noise multiplier (if None, will be auto-calculated)")
-        parser.add_argument("--privacy_accountant", type=str, default="rdp", choices=["rdp", "gdp", "prv"],
-                          help="Privacy accounting method")
-        parser.add_argument("--sample_rate", type=float, default=-1.0,
-                          help="Poisson sampling rate. If negative, calculated from batch_size/dataset_size")
-        parser.add_argument("--secure_mode", type=bool, default=False,
-                          help="Use cryptographically secure RNG (slower but more secure)")
-        parser.add_argument("--rdp_alpha_max", type=int, default=64,
-                          help="Maximum alpha for RDP accountant (larger = tighter bound)")
-        return parser.parse_args(args_list)

@@ -73,7 +73,7 @@ class DPManager:
                 fixed_model = validator.fix(model)
                 logging.info("Model automatically fixed for DP compatibility")
                 return fixed_model
-            except Exception as e:
+            except Exception:
                 errors = validator.validate(model, strict=False)
                 raise ValueError(f"Model incompatible with Opacus: {errors}")
         else:
