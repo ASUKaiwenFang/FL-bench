@@ -54,7 +54,8 @@ class DPFedAvgClient(FedAvgClient):
     def _reset_privacy_engine(self):
         """Reset Privacy Engine state to ensure client isolation"""
         if self.privacy_engine is not None:
-            # Clean up old privacy engine
+            # Reset privacy engine for client isolation
+            # (expected behavior each round, no warning needed)
             self.privacy_engine = None
         # Reset privacy_stats (noise_multiplier will be set again in setup)
         self.privacy_stats = DPManager.create_privacy_stats_dict()
@@ -136,19 +137,6 @@ class DPFedAvgClient(FedAvgClient):
         # Update privacy statistics from accountant
         self._update_privacy_stats()
 
-        # Verify accountant state and explain if steps don't match
-        # accountant_steps_after = len(self.privacy_engine.accountant.history)
-        # accountant_steps_added = accountant_steps_after - accountant_steps_before
-
-        # if total_steps != accountant_steps_added:
-        #     epsilon_after = self.privacy_engine.accountant.get_epsilon(delta=self.dp_config["delta"])
-            # logging.info(
-            #     f"[INFO] Privacy accounting: {total_steps} batches processed, "
-            #     f"but {accountant_steps_added} accountant steps recorded. "
-            #     f"This is EXPECTED due to Opacus gradient accumulation mechanism - "
-            #     f"multiple batches are recorded as a single logical step. "
-            #     f"Epsilon calculation (ε={epsilon_after:.4f}) remains correct."
-            # )
 
     def _update_privacy_stats(self):
         """Update privacy budget consumption statistics."""

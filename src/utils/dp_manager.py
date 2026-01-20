@@ -2,15 +2,17 @@
 Differential Privacy Manager for FL-bench integration with Opacus.
 Handles all DP-related operations in a centralized manner.
 """
-import logging
 from collections import OrderedDict
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 
 import torch
 
 from opacus import PrivacyEngine
 from opacus.validators import ModuleValidator
 from opacus.accountants.utils import get_noise_multiplier
+
+if TYPE_CHECKING:
+    from src.utils.logger import Logger
 
 
 class DPManager:
@@ -22,6 +24,9 @@ class DPManager:
     def __init__(self, args):
         self.args = args
         self.dp_config = args.dpfedavg
+
+        # Logger will be injected by server after initialization
+        self._logger: Optional["Logger"] = None
 
         # DP parameters
         self.epsilon = self.dp_config.epsilon
@@ -44,11 +49,24 @@ class DPManager:
         # Per-client cumulative epsilon tracking
         self.client_epsilon_cumulative = {}  # {client_id: cumulative_epsilon}
 
-        logging.info(
+    def set_logger(self, logger: "Logger"):
+        """Inject server-side logger and output initialization message."""
+        self._logger = logger
+        self._log(
             f"🔒 DPManager initialized: Target privacy budget ε={self.epsilon}, δ={self.delta}\n"
             f"   Privacy tracking: Using max(client_epsilon) for parallel training\n"
             f"   Accounting: {getattr(self.dp_config, 'privacy_accountant', 'rdp').upper()} accountant"
         )
+
+    def _log(self, msg: str):
+        """Log message using server logger if available."""
+        if self._logger:
+            self._logger.log(msg)
+
+    def _warn(self, msg: str):
+        """Log warning using server logger if available."""
+        if self._logger:
+            self._logger.warn(msg)
 
     @staticmethod
     def create_privacy_stats_dict() -> Dict[str, Any]:
@@ -71,7 +89,7 @@ class DPManager:
         if not validator.is_valid(model):
             try:
                 fixed_model = validator.fix(model)
-                logging.info("Model automatically fixed for DP compatibility")
+                self._log("Model automatically fixed for DP compatibility")
                 return fixed_model
             except Exception:
                 errors = validator.validate(model, strict=False)
@@ -200,7 +218,7 @@ class DPManager:
             )
         else:
             # For other accountants, use RDP as fallback
-            logging.warning(f"Accountant {accountant} not fully implemented, using RDP")
+            self._warn(f"Accountant {accountant} not fully implemented, using RDP")
             return get_noise_multiplier(
                 target_epsilon=self.epsilon,
                 target_delta=self.delta,

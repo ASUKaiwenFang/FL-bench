@@ -47,6 +47,9 @@ class DPFedAvgServer(FedAvgServer):
         if init_trainer:
             self.init_trainer()
 
+        # Inject logger into DPManager now that parent init is complete
+        self.dp_manager.set_logger(self.logger)
+
     def init_model(self, model=None, preprocess_func=None, postprocess_func=None):
         """Initialize model with DP preparation."""
         # First, initialize the model normally
