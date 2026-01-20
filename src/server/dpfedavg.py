@@ -1,8 +1,8 @@
+import logging
 import math
 from argparse import ArgumentParser, Namespace
 from collections import OrderedDict
 from typing import Any, Dict
-import logging
 
 from src.client.dpfedavg import DPFedAvgClient
 from src.server.fedavg import FedAvgServer
